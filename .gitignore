@@ -1,0 +1,61 @@
+# Dependencies
+**/node_modules/
+
+# Build and framework output
+**/.next/
+**/out/
+**/dist/
+**/build/
+**/.vercel/
+**/tsconfig.tsbuildinfo
+
+# Python
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Virtual environments
+**/.venv/
+**/venv/
+**/.venv-1/
+
+# Runtime logs and local databases
+**/*.log
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# Environment and secrets
+**/.env
+**/.env.local
+**/.env.*.local
+**/.streamlit/secrets.toml
+!**/.env.example
+!**/secrets.example.toml
+
+# WhatsApp Web local session/cache
+**/.wwebjs_auth/
+**/.wwebjs_cache/
+**/messages.jsonl
+
+# Nested repository metadata left from the previous layout
+frontend/streamlit/.git/
+
+# Local agent/tooling state
+.agent/
+.agents/
+.claude/
+skills-lock.json
+SigmaAtendimento/
+
+# Local/raw business data
+database/data/*.xlsx
+database/data/*.xls
+database/data/*.csv
+
+# OS/editor
+.DS_Store
+Thumbs.db
+**/.vscode/

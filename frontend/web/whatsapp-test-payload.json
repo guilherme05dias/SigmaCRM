@@ -1,0 +1,8 @@
+{
+  "contactName": "Cliente Teste",
+  "contactNumber": "5511999999999",
+  "direction": "in",
+  "body": "Mensagem de teste recebida pelo WhatsApp.",
+  "timestamp": "2026-06-03T09:00:00.000Z",
+  "waMessageId": "wamid.TESTE_SERVICOCRM"
+}

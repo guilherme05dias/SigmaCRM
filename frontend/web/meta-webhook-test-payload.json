@@ -1,0 +1,39 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WABA_ID_DE_TESTE",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "5511000000000",
+              "phone_number_id": "PHONE_NUMBER_ID_DE_TESTE"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Cliente Teste"
+                },
+                "wa_id": "5511999999999"
+              }
+            ],
+            "messages": [
+              {
+                "from": "5511999999999",
+                "id": "wamid.TESTE_META_SERVICOCRM",
+                "timestamp": "1780491600",
+                "text": {
+                  "body": "Mensagem de teste recebida via payload oficial da Meta."
+                },
+                "type": "text"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

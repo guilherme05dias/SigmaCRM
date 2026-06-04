@@ -1,0 +1,42 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+.venv-1/
+
+# Runtime artifacts
+*.log
+
+# Local database (optional: keep local only)
+crm_tecnicos.db
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# WhatsApp bridge secrets
+whatsapp_bridge/.env
+
+# Node modules
+whatsapp_bridge/node_modules/
+
+# WhatsApp session e cache (dados locais da máquina)
+whatsapp_bridge/.wwebjs_auth/
+whatsapp_bridge/.wwebjs_cache/
+whatsapp_bridge/messages.jsonl
+
+# Banco de dados local (legado)
+*.db
+*.sqlite
+*.sqlite3
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
