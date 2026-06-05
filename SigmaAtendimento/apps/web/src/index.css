@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Sigma — base layer (trust-blue light)
+   Tokens e racional do design system em docs/M2_NOTES.md.
+─────────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  h1, h2, h3, h4, h5 {
+    @apply font-display font-semibold tracking-tight text-foreground;
+  }
+
+  /* Foco visível e consistente em tudo que é interativo (acessibilidade) */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-background rounded-default;
+  }
+}
+
+@layer utilities {
+  /* Scrollbar discreta no tema claro */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #CBD5E1 transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: #CBD5E1;
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+}
+
+/* Respeita quem prefere menos movimento */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

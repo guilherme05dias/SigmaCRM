@@ -1,0 +1,22 @@
+{
+  "name": "sigma-atendimento",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=@sigma/api",
+    "dev:web": "npm run dev --workspace=@sigma/web",
+    "dev": "npx concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "build:api": "npm run build --workspace=@sigma/api",
+    "build:web": "npm run build --workspace=@sigma/web",
+    "build": "npm run build:api && npm run build:web",
+    "typecheck": "tsc --noEmit -p apps/api/tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json && tsc --noEmit -p packages/shared/tsconfig.json"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.3.0"
+  }
+}

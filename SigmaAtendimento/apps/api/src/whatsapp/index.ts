@@ -1,0 +1,24 @@
+import { IWhatsAppProvider } from "./IWhatsAppProvider";
+import { MetaCloudWhatsAppProvider } from "./providers/MetaCloudWhatsAppProvider";
+import { MockWhatsAppProvider } from "./providers/MockWhatsAppProvider";
+import { MuriloWhatsAppApiProvider } from "./providers/MuriloWhatsAppApiProvider";
+
+let providerInstance: IWhatsAppProvider | null = null;
+
+export function getWhatsAppProvider(): IWhatsAppProvider {
+    if (!providerInstance) {
+        const providerType = process.env.WHATSAPP_PROVIDER || "mock";
+
+        if (providerType === "meta-cloud") {
+            console.log("[SIGMA] Using MetaCloudWhatsAppProvider as WhatsApp Provider");
+            providerInstance = new MetaCloudWhatsAppProvider();
+        } else if (providerType === "murilo-api") {
+            console.log("[SIGMA] Using MuriloWhatsAppApiProvider as WhatsApp Provider");
+            providerInstance = new MuriloWhatsAppApiProvider();
+        } else {
+            console.log("[SIGMA] Using MockWhatsAppProvider as default WhatsApp Provider");
+            providerInstance = new MockWhatsAppProvider();
+        }
+    }
+    return providerInstance as IWhatsAppProvider;
+}

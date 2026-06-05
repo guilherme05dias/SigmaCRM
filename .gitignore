@@ -48,7 +48,15 @@ frontend/streamlit/.git/
 .agents/
 .claude/
 skills-lock.json
-SigmaAtendimento/
+SigmaAtendimento/.agent/
+SigmaAtendimento/.agents/
+SigmaAtendimento/antigravity-awesome-skills-main/
+SigmaAtendimento/gemini-skills-main*/
+SigmaAtendimento/stitch_exports/
+SigmaAtendimento/apps/api/log.txt
+SigmaAtendimento/apps/api/*error*.txt
+SigmaAtendimento/apps/api/ts_errors.txt
+SigmaAtendimento/test-login.js
 
 # Local/raw business data
 database/data/*.xlsx

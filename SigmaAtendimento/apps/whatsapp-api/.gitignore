@@ -1,0 +1,5 @@
+node_modules/
+
+src/sessions
+.wwebjs_cache
+.cache

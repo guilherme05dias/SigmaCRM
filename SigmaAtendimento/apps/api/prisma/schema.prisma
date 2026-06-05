@@ -1,0 +1,389 @@
+// Sigma (Atendimento + CRM) — schema convergente (M2)
+// Decisões: docs/ARCHITECTURE_DECISIONS.md (ADR-02..07).
+// Padrão camelCase (ADR-05). Multi-tenant: companyId em toda tabela de negócio (ADR-02).
+// Após editar: rode `npx prisma format && npx prisma validate` antes do migrate.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─────────────────────────────── ENUMS ───────────────────────────────
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+}
+
+enum ConversationStatus {
+  OPEN
+  ASSIGNED
+  CLOSED
+}
+
+enum TicketStatus {
+  NEW
+  QUEUED
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  WAITING_INTERNAL
+  SCHEDULED_FIELD_SERVICE
+  RESOLVED
+  CLOSED
+  CANCELED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum TicketChannel {
+  WHATSAPP
+  PHONE
+  EMAIL
+  PRESENCIAL
+  OTHER
+}
+
+enum ServiceType {
+  REMOTO
+  PRESENCIAL
+  HIBRIDO
+}
+
+enum CustomerStatus {
+  ATIVO
+  NEGOCIACAO
+  INATIVO
+}
+
+enum TimelineType {
+  CREATED
+  STATUS_CHANGE
+  ASSIGNMENT
+  NOTE
+  MESSAGE
+  FIELD_SERVICE
+  EVALUATION
+}
+
+enum WhatsAppProvider {
+  WAHA
+  META
+  MOCK
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ─────────────────────────────── TENANT / EQUIPE ───────────────────────────────
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String   @map("nome")
+  legalName String?  @map("razao_social")
+  active    Boolean  @default(true) @map("ativo")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users       User[]
+  departments Department[]
+  settings    Settings?
+}
+
+model User {
+  id           String      @id @default(uuid())
+  companyId    String?     @map("company_id")
+  company      Company?    @relation(fields: [companyId], references: [id])
+  name         String      @map("nome")
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  role         String      @default("AGENT") // ADMIN, SUPERVISOR, AGENT
+  specialty    String? // técnico = User com especialidade (ADR-03)
+  departmentId String?     @map("department_id")
+  department   Department? @relation(fields: [departmentId], references: [id])
+  active       Boolean     @default(true) @map("ativo")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  conversations   Conversation[]       @relation("ConversationAssignee")
+  messages        Message[]
+  ticketsAssigned Ticket[]             @relation("TicketAssignee")
+  fieldServices   TicketFieldService[] @relation("FieldTechnician")
+  timelineEvents  TicketTimeline[]     @relation("TimelineActor")
+
+  @@index([companyId])
+}
+
+model Department {
+  id          String   @id @default(uuid())
+  companyId   String?  @map("company_id")
+  company     Company? @relation(fields: [companyId], references: [id])
+  name        String   @map("nome")
+  description String?  @map("descricao")
+  active      Boolean  @default(true) @map("ativo")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users         User[]
+  conversations Conversation[]
+  tickets       Ticket[]
+
+  @@index([companyId])
+}
+
+model Settings {
+  id             String   @id @default(uuid())
+  companyId      String   @unique @map("company_id")
+  company        Company  @relation(fields: [companyId], references: [id])
+  businessHours  Json // array de 7 dias: [{ status, startTime, endTime }]
+  welcomeMessage String?
+  awayMessage    String?
+  closingMessage String?
+  updatedAt      DateTime @updatedAt @map("updated_at")
+}
+
+// ─────────────────────────────── CRM ───────────────────────────────
+
+model Customer {
+  id        String         @id @default(uuid())
+  companyId String
+  name      String
+  document  String? // CNPJ/CPF
+  segment   String?
+  city      String?
+  status    CustomerStatus @default(ATIVO)
+  notes     String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  contacts Contact[]
+  tickets  Ticket[]
+
+  @@index([companyId])
+}
+
+model Contact {
+  id         String    @id @default(uuid())
+  companyId  String?
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  name       String?
+  phone      String    @unique
+  email      String?
+  role       String?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  conversations Conversation[]
+  tickets       Ticket[]
+
+  @@index([companyId])
+}
+
+// ─────────────────────────────── ATENDIMENTO ───────────────────────────────
+
+model Conversation {
+  id             String             @id @default(uuid())
+  companyId      String?
+  contactId      String
+  contact        Contact            @relation(fields: [contactId], references: [id])
+  status         ConversationStatus @default(OPEN)
+  assignedUserId String?
+  assignedUser   User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id])
+  departmentId   String?
+  department     Department?        @relation(fields: [departmentId], references: [id])
+
+  lastMessageAt          DateTime?
+  startedAt              DateTime?
+  closedAt               DateTime?
+  isTransferred          Boolean   @default(false)
+  totalHandleTimeSeconds Int?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  messages Message[]
+  tickets  Ticket[]
+
+  @@index([companyId])
+  @@index([contactId])
+}
+
+model Message {
+  id             String           @id @default(uuid())
+  companyId      String?
+  conversationId String
+  conversation   Conversation     @relation(fields: [conversationId], references: [id])
+  direction      MessageDirection
+  type           MessageType
+  body           String?
+  mediaUrl       String?
+  waMessageId    String?
+  userId         String?
+  user           User?            @relation(fields: [userId], references: [id])
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([companyId])
+  @@index([conversationId])
+}
+
+model Ticket {
+  id             String         @id @default(uuid())
+  companyId      String?
+  protocol       String? // ATD{YYYYMMDD}-{seq:03d} — ADR-07
+  contactId      String
+  contact        Contact        @relation(fields: [contactId], references: [id])
+  customerId     String?
+  customer       Customer?      @relation(fields: [customerId], references: [id])
+  conversationId String?
+  conversation   Conversation?  @relation(fields: [conversationId], references: [id])
+  title          String
+  description    String?
+  category       String?
+  channel        TicketChannel  @default(WHATSAPP)
+  priority       TicketPriority @default(MEDIUM)
+  status         TicketStatus   @default(NEW)
+
+  assignedUserId String? // atendente responsável (ADR-03)
+  assignedUser   User?       @relation("TicketAssignee", fields: [assignedUserId], references: [id])
+  departmentId   String? // fila/departamento
+  department     Department? @relation(fields: [departmentId], references: [id])
+
+  notesInternal String?
+  dueAt         DateTime?
+  solvedAt      DateTime?
+  closedAt      DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  fieldService TicketFieldService?
+  evaluation   TicketEvaluation?
+  timeline     TicketTimeline[]
+
+  @@unique([companyId, protocol])
+  @@index([companyId])
+  @@index([status])
+}
+
+model TicketFieldService {
+  id           String      @id @default(uuid())
+  companyId    String?
+  ticketId     String      @unique
+  ticket       Ticket      @relation(fields: [ticketId], references: [id])
+  technicianId String? // técnico da execução (ADR-03)
+  technician   User?       @relation("FieldTechnician", fields: [technicianId], references: [id])
+  serviceType  ServiceType @default(REMOTO)
+  equipment    String?
+  scheduledAt  DateTime?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  hoursSpent   Float?
+  resolution   String?
+
+  // específicos de visita presencial
+  onSiteRequired   Boolean   @default(false)
+  visitAddress     String?
+  visitWindowStart DateTime?
+  visitWindowEnd   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+model TicketEvaluation {
+  id        String   @id @default(uuid())
+  companyId String?
+  ticketId  String   @unique
+  ticket    Ticket   @relation(fields: [ticketId], references: [id])
+  rating    Int // 1..5 (CSAT)
+  comment   String?
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+}
+
+model TicketTimeline {
+  id          String       @id @default(uuid())
+  companyId   String?
+  ticketId    String
+  ticket      Ticket       @relation(fields: [ticketId], references: [id])
+  type        TimelineType
+  actorUserId String?
+  actor       User?        @relation("TimelineActor", fields: [actorUserId], references: [id])
+  payload     Json?
+  createdAt   DateTime     @default(now())
+
+  @@index([companyId])
+  @@index([ticketId])
+}
+
+// ─────────────────────────────── PROTOCOLO / WHATSAPP ───────────────────────────────
+
+// Contador transacional p/ protocolo: scope = "ATD-" + YYYYMMDD (reset diário) — ADR-07
+model Counter {
+  companyId String
+  scope     String
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@id([companyId, scope])
+}
+
+model WhatsAppInboundEvent {
+  id                String           @id @default(uuid())
+  companyId         String?
+  provider          WhatsAppProvider @default(WAHA)
+  providerMessageId String?
+  phoneNumberId     String? // futuro Meta Cloud / multi-número
+  fromPhone         String?
+  rawPayload        Json
+  processedAt       DateTime?
+  createdAt         DateTime         @default(now())
+
+  @@unique([provider, providerMessageId]) // idempotência
+  @@index([companyId])
+}
+
+model WhatsAppOutbox {
+  id                String           @id @default(uuid())
+  companyId         String?
+  conversationId    String?
+  messageId         String?
+  provider          WhatsAppProvider @default(WAHA)
+  phoneNumberId     String?
+  toPhone           String
+  payload           Json
+  status            OutboxStatus     @default(PENDING)
+  attempts          Int              @default(0)
+  lastError         String?
+  providerMessageId String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([companyId])
+  @@index([status])
+}

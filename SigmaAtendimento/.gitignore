@@ -1,0 +1,26 @@
+# Dependencies / build
+**/node_modules/
+**/dist/
+**/.vite/
+**/coverage/
+
+# Env / secrets (nunca versionar)
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+
+# Agent tooling / skills — NÃO fazem parte do produto
+.agent/
+.agents/
+skills-lock.json
+antigravity-awesome-skills-main/
+
+# Logs / OS / editor
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Prisma local
+**/prisma/*.db

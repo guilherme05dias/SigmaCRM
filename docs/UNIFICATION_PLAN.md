@@ -14,6 +14,20 @@ Decisões já tomadas:
 - **Dados atuais:** não há dados reais → **começar limpo** (schema novo + seed).
 - **WhatsApp:** **um número, vários departamentos** (roteamento por fila/depto).
 
+> **Atualização 2026-06-05 (pós-auditoria M1).** Detalhes e decisões finais em
+> [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md). Principais ajustes após ler
+> o código real do Sigma:
+> - ✅ **Provider de WhatsApp + Mock já existem** (`IWhatsAppProvider`, `MockWhatsAppProvider`,
+>   `MetaCloudWhatsAppProvider`) — falta um provider **WAHA** e a camada de **outbox/eventos**.
+> - ✅ **Frontend já tem UI base** e as telas de atendimento (Inbox/Tickets/Users/Departments/
+>   Reports/Settings). Faltam **Clientes** e **Dashboard** + aplicar a paleta trust-blue.
+> - 🔴 **Multi-tenant não está aplicado** (sem `companyId` em Contact/Conversation/Message/Ticket
+>   nem escopo nas queries) → tratar como crítico no M2 (Prisma extension + RLS).
+> - ✂️ **Poda de over-engineering:** `protocol` vira **coluna** (+counter), não tabela; nada de
+>   `TicketAssignment` (usar FKs + `TicketTimeline`). Mantidos `TicketFieldService`,
+>   `TicketEvaluation`, `TicketTimeline`, `WhatsAppOutbox`.
+> - 🐞 Corrigir bug de prioridade (`URGENT` no Zod ✗ enum Prisma) e padronizar nomenclatura.
+
 ---
 
 ## 1. Como está hoje (as-is)
