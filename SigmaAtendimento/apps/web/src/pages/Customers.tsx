@@ -1,9 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { Button } from '../components/ui/Button';
 import { Icon } from '../components/ui/Icon';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 type CustomerStatus = 'ATIVO' | 'NEGOCIACAO' | 'INATIVO';
 
@@ -40,8 +41,6 @@ const initialForm: CustomerFormState = {
     status: 'ATIVO',
 };
 
-const mockUser = { nome: 'Admin', role: 'Administrador' };
-
 const statusStyles: Record<CustomerStatus, string> = {
     ATIVO: 'bg-success-soft text-success-fg border-success/20',
     NEGOCIACAO: 'bg-warning-soft text-warning-fg border-warning/20',
@@ -50,8 +49,10 @@ const statusStyles: Record<CustomerStatus, string> = {
 
 export default function Customers() {
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
+    const [searchParams] = useSearchParams();
     const [customers, setCustomers] = useState<Customer[]>([]);
-    const [query, setQuery] = useState('');
+    const [query, setQuery] = useState(searchParams.get('query') || '');
     const [status, setStatus] = useState('');
     const [form, setForm] = useState<CustomerFormState>(initialForm);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -82,6 +83,10 @@ export default function Customers() {
         return () => window.clearTimeout(timeoutId);
     }, [query, status]);
 
+    useEffect(() => {
+        setQuery(searchParams.get('query') || '');
+    }, [searchParams]);
+
     const stats = useMemo(() => {
         return {
             total: customers.length,
@@ -90,11 +95,6 @@ export default function Customers() {
             tickets: customers.reduce((sum, customer) => sum + (customer._count?.tickets || 0), 0),
         };
     }, [customers]);
-
-    const handleLogout = () => {
-        localStorage.removeItem('sigma-token');
-        navigate('/login');
-    };
 
     const handleSubmit = async (event: FormEvent) => {
         event.preventDefault();
@@ -159,8 +159,8 @@ export default function Customers() {
 
     return (
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
-            <SigmaSidebarIcon user={mockUser} onLogout={handleLogout} />
-            <main className="flex-1 overflow-y-auto">
+            <SigmaSidebarIcon user={user} onLogout={logout} />
+            <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
                 <div className="mx-auto grid w-full max-w-[1440px] grid-cols-1 gap-8 p-6 lg:grid-cols-[1fr_360px] lg:p-10">
                     <section className="min-w-0">
                         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">

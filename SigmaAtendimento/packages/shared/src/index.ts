@@ -11,6 +11,7 @@ export const UserSchema = z.object({
     email: z.string().email(),
     password: z.string().min(6).optional(), // Usado na criação
     role: RoleEnum,
+    messageSignature: z.string().optional().nullable(),
     department_id: z.string().uuid().nullable().optional(),
     ativo: z.boolean(),
     created_at: z.date().optional(),

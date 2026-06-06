@@ -120,6 +120,7 @@ model User {
   passwordHash String      @map("password_hash")
   role         String      @default("AGENT") // ADMIN, SUPERVISOR, AGENT
   specialty    String? // técnico = User com especialidade (ADR-03)
+  messageSignature String? @map("message_signature")
   departmentId String?     @map("department_id")
   department   Department? @relation(fields: [departmentId], references: [id])
   active       Boolean     @default(true) @map("ativo")

@@ -2,8 +2,8 @@ import {
     LayoutGrid, Search, Bell, MessageCircle, LayoutDashboard, MessageSquare,
     MessagesSquare, Ticket, Building2, Users, BarChart3, Settings, Wrench,
     UserPlus, Pencil, Trash2, Clock, Smartphone, Eye, LogIn, Ban, ShieldCheck,
-    UserCog, BadgeCheck, CheckCircle2, Smile, CircleAlert, QrCode, Save,
-    ListFilter, Hammer, Network, Mail, Lock, type LucideIcon,
+    UserCog, BadgeCheck, CheckCircle2, Smile, CircleAlert, QrCode, Save, Info,
+    ListFilter, Hammer, Network, Mail, Lock, Sun, Moon, type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -32,6 +32,8 @@ const registry = {
     settings: Settings,
     search: Search,
     notifications: Bell,
+    light_mode: Sun,
+    dark_mode: Moon,
     // ações
     filter_list: ListFilter,
     person_add: UserPlus,
@@ -56,6 +58,7 @@ const registry = {
     check_circle: CheckCircle2,
     sentiment_satisfied: Smile,
     error: CircleAlert,
+    info: Info,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof registry;

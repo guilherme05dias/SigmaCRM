@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { StatusBadge, PriorityBadge } from '../components/ui/Badge';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 export interface Ticket {
     id: string;
@@ -27,6 +28,7 @@ export interface Ticket {
 
 export default function Tickets() {
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [statusFilter, setStatusFilter] = useState<string>('');
     const [priorityFilter, setPriorityFilter] = useState<string>('');
@@ -61,11 +63,6 @@ export default function Tickets() {
         loadTickets();
     }, [statusFilter, priorityFilter]);
 
-    const handleLogout = () => {
-        localStorage.removeItem('sigma-token');
-        navigate('/login');
-    };
-
     const handleStatusUpdate = (id: string, newStatus: string) => {
         apiRequest(`/api/tickets/${id}`, {
             method: 'PATCH',
@@ -75,12 +72,10 @@ export default function Tickets() {
             .catch(console.error);
     }
 
-    const mockUser = { nome: 'Admin', role: 'Administrador' };
-
     return (
         <div className="flex h-screen bg-background text-foreground font-sans overflow-hidden">
-            <SigmaSidebarIcon user={mockUser} onLogout={handleLogout} />
-            <main className="flex-1 flex flex-col p-8 overflow-y-auto">
+            <SigmaSidebarIcon user={user} onLogout={logout} />
+            <main className="flex-1 flex flex-col overflow-y-auto p-4 pb-20 md:p-8 md:pb-8">
                 <div className="flex justify-between items-center mb-8">
                     <div>
                         <h1 className="text-3xl font-display font-bold text-foreground mb-2">Chamados e Atendimentos</h1>
@@ -167,7 +162,9 @@ export default function Tickets() {
                                 {tickets.map(ticket => (
                                     <tr key={ticket.id} className="hover:bg-surface-alt transition-colors">
                                         <td className="px-6 py-4">
-                                            <div className="font-medium text-foreground mb-1">{ticket.protocol || `#${ticket.id.slice(0, 6)}`} - {ticket.title}</div>
+                                            <Link to={`/tickets/${ticket.id}`} className="mb-1 block font-medium text-foreground hover:text-primary">
+                                                {ticket.protocol || `#${ticket.id.slice(0, 6)}`} - {ticket.title}
+                                            </Link>
                                             <div className="text-xs text-muted-foreground">
                                                 {ticket.customer?.name || ticket.contact?.name || ticket.contact?.phone}
                                             </div>
@@ -207,6 +204,9 @@ export default function Tickets() {
                                                     Resolver
                                                 </button>
                                             )}
+                                            <Link to={`/tickets/${ticket.id}`} className="ml-3 text-xs font-semibold text-primary hover:text-primary-700">
+                                                Detalhes
+                                            </Link>
                                         </td>
                                     </tr>
                                 ))}

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { PrismaClient, ConversationStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
-import { getIO } from '../socket';
+import { getIO, emitToCompany } from '../socket';
 import { getWhatsAppProvider } from '../whatsapp';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { getCompanyId } from '../lib/tenant';
@@ -149,7 +149,7 @@ router.post('/conversations/:id/take', async (req, res) => {
             data: dataToUpdate,
             include: { contact: true, assignedUser: true, department: true }
         });
-        getIO().emit('conversation:updated', conversation);
+        emitToCompany(conversation.companyId, 'conversation:updated', conversation);
         res.json(conversation);
     } catch (error) {
         console.error('Error taking conversation:', error);
@@ -175,7 +175,7 @@ router.post('/conversations/:id/transfer', async (req, res) => {
             data,
             include: { contact: true, assignedUser: true, department: true }
         });
-        getIO().emit('conversation:updated', conversation);
+        emitToCompany(conversation.companyId, 'conversation:updated', conversation);
         res.json(conversation);
     } catch (error) {
         console.error('Error transferring conversation:', error);
@@ -209,7 +209,7 @@ router.post('/conversations/:id/close', async (req, res) => {
             include: { contact: true, assignedUser: true, department: true }
         });
 
-        getIO().emit('conversation:updated', conversation);
+        emitToCompany(conversation.companyId, 'conversation:updated', conversation);
 
         // Fetch settings for closing message
         const settings = await prisma.settings.findFirst();
@@ -314,7 +314,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
         });
 
         getIO().to(`conversation:${conversationId}`).emit('message:new', message);
-        getIO().emit('conversation:updated', conversation);
+        emitToCompany(conversation.companyId, 'conversation:updated', conversation);
 
         res.status(201).json(message);
     } catch (error) {
@@ -388,7 +388,7 @@ router.post('/conversations/:id/tickets', async (req, res) => {
             });
         });
 
-        getIO().emit('ticket:new', ticket);
+        emitToCompany(companyId, 'ticket:new', ticket);
 
         res.status(201).json(ticket);
     } catch (error) {

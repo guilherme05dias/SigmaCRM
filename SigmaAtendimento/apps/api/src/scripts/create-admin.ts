@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { hashPassword } from '../lib/password';
 
 const prisma = new PrismaClient();
 
@@ -25,7 +26,7 @@ async function main() {
     data: {
       name: 'Admin',
       email: 'admin@sigma.com',
-      passwordHash: '123456',
+      passwordHash: await hashPassword('123456'),
       role: 'ADMIN',
       companyId: company.id,
     },

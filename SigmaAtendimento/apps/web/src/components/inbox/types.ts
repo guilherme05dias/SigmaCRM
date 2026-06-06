@@ -23,6 +23,7 @@ export interface Conversation {
     department?: { id: string; name: string } | null;
     assignedUser: { id: string; nome: string } | null;
     messages: Message[]; // preview
+    createdAt?: string | Date;
     lastMessageAt?: string | Date;
     startedAt?: string | null;
     closedAt?: string | null;

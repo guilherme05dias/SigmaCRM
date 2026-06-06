@@ -1,4 +1,4 @@
-import { IWhatsAppProvider, ParsedIncomingPayload, SessionSummary } from "../IWhatsAppProvider";
+import { IWhatsAppProvider, ParsedIncomingPayload, SessionSummary, WhatsAppHistoryChat, WhatsAppHistorySyncOptions } from "../IWhatsAppProvider";
 import { PrismaClient, MessageDirection, MessageType, ConversationStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -6,6 +6,10 @@ const prisma = new PrismaClient();
 export class MockWhatsAppProvider implements IWhatsAppProvider {
     async createSession(sessionId: string): Promise<void> {
         console.log(`[MOCK WAHA] createSession called with sessionId: ${sessionId}`);
+    }
+
+    async disconnectSession(sessionId: string): Promise<void> {
+        console.log(`[MOCK WAHA] disconnectSession called with sessionId: ${sessionId}`);
     }
 
     async listSessions(): Promise<SessionSummary[]> {
@@ -16,6 +20,20 @@ export class MockWhatsAppProvider implements IWhatsAppProvider {
                 status: "WORKING"
             }
         ];
+    }
+
+    async checkContact(phone: string): Promise<{ exists: boolean; phone: string; name?: string | null; wid?: string | null }> {
+        const normalizedPhone = phone.replace(/\D/g, '');
+        return {
+            exists: normalizedPhone.length >= 10 && !normalizedPhone.endsWith('0000'),
+            phone: normalizedPhone,
+            name: normalizedPhone.length >= 10 ? `Contato ${normalizedPhone.slice(-4)}` : null,
+            wid: normalizedPhone.length >= 10 ? `${normalizedPhone}@c.us` : null,
+        };
+    }
+
+    async syncHistory(_options: WhatsAppHistorySyncOptions = {}): Promise<WhatsAppHistoryChat[]> {
+        return [];
     }
 
     async sendText(params: { to: string; body: string; sessionId?: string }): Promise<{ waMessageId: string }> {

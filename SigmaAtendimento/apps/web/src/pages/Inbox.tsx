@@ -6,94 +6,89 @@ import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { useNavigate } from 'react-router-dom';
 import type { Conversation, Message } from '../components/inbox/types';
 import { useInboxSocket } from '../lib/useInboxSocket';
+import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { clearAuthToken, getAuthToken } from '../lib/authToken';
+import { useAuth } from '../lib/auth';
+
+interface DepartmentOption {
+    id: string;
+    name: string;
+    active?: boolean;
+}
 
 export default function Inbox() {
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isClosingConversation, setIsClosingConversation] = useState(false);
+    const [isCreatingTicket, setIsCreatingTicket] = useState(false);
+    const [createTicketError, setCreateTicketError] = useState<string | null>(null);
+    const [sendError, setSendError] = useState<string | null>(null);
+    const [isStartingConversation, setIsStartingConversation] = useState(false);
+    const [startConversationError, setStartConversationError] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
+    const [departments, setDepartments] = useState<DepartmentOption[]>([]);
     const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
     const [isLoadingMessages, setIsLoadingMessages] = useState<boolean>(false);
-    const [activeTab, setActiveTab] = useState<'chats' | 'fila' | 'contatos'>('chats');
+    const [activeTab, setActiveTab] = useState<'chats' | 'fila' | 'historico' | 'contatos'>('chats');
     const [unauthorized, setUnauthorized] = useState(false);
     const redirectingRef = useRef(false);
 
-    const token = localStorage.getItem('sigma-token');
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const token = getAuthToken();
 
     // Redireciona via useEffect — navigate não deve ser chamado dentro de Promise
     useEffect(() => {
         if (unauthorized && !redirectingRef.current) {
             redirectingRef.current = true;
-            localStorage.removeItem('sigma-token');
+            clearAuthToken();
             navigate('/login');
         }
     }, [unauthorized, navigate]);
 
-    /** Sinaliza 401/403 como estado — não navega diretamente */
-    const handle401 = (res: Response): boolean => {
-        if (res.status === 401 || res.status === 403) {
+    const handleApiError = (err: unknown) => {
+        if (redirectOnUnauthorized(err, navigate)) {
             setUnauthorized(true);
             return true;
         }
-        return false;
+        console.error(err);
+        return true;
     };
 
     const loadConversations = () => {
-        fetch('http://localhost:3334/api/conversations', { headers })
-            .then(res => {
-                if (handle401(res)) return null;
-                return res.json();
-            })
+        apiRequest<Conversation[]>('/api/conversations')
             .then(data => {
                 if (Array.isArray(data)) setConversations(data);
             })
-            .catch(console.error);
+            .catch(handleApiError);
     };
 
     useEffect(() => {
         loadConversations();
+        apiRequest<DepartmentOption[]>('/api/departments')
+            .then((data) => setDepartments(Array.isArray(data) ? data : []))
+            .catch(handleApiError);
     }, []);
 
-    const loadMessages = (id: string, cursor?: string) => {
+    const loadMessages = (id: string) => {
         setIsLoadingMessages(true);
-        const url = new URL(`http://localhost:3334/api/conversations/${id}/messages`);
-        if (cursor) url.searchParams.append('cursor', cursor);
-        url.searchParams.append('take', '50');
-
-        fetch(url.toString(), { headers })
-            .then(res => {
-                if (handle401(res)) return null;
-                return res.json();
-            })
+        apiRequest<{ data: Message[]; meta?: { hasMore?: boolean } }>(`/api/conversations/${id}/messages`)
             .then(data => {
                 if (!data) return;
-                const fetchedMessages = Array.isArray(data.data) ? data.data : [];
-                const meta = data.meta || { hasMore: false };
-
-                if (cursor) {
-                    setMessages(prev => {
-                        const existingIds = new Set(prev.map(m => m.id));
-                        const newMsgs = fetchedMessages.filter((m: Message) => !existingIds.has(m.id));
-                        return [...newMsgs, ...prev];
-                    });
-                } else {
-                    setMessages(fetchedMessages);
-                }
-                setHasMoreMessages(meta.hasMore);
+                const fetched = Array.isArray(data.data) ? data.data : [];
+                setMessages(fetched);
+                setHasMoreMessages(Boolean(data.meta?.hasMore));
             })
-            .catch(console.error)
+            .catch(handleApiError)
             .finally(() => setIsLoadingMessages(false));
     };
 
+    // Paginação de mensagens mais antigas (backend retorna hasMore:false hoje,
+    // mas a estrutura está pronta para quando for ativada)
     const loadMoreMessages = () => {
-        if (!selectedConvId || !hasMoreMessages || messages.length === 0 || isLoadingMessages) return;
-        const sortedMessages = [...messages].sort(
-            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
-        const cursor = sortedMessages[0]?.id;
-        if (cursor) loadMessages(selectedConvId, cursor);
+        if (!selectedConvId || !hasMoreMessages || isLoadingMessages) return;
+        loadMessages(selectedConvId);
     };
 
     useEffect(() => {
@@ -103,6 +98,7 @@ export default function Inbox() {
     const { isConnected } = useInboxSocket(
         token,
         selectedConvId,
+        // conversation:updated
         (updatedConv: Conversation) => {
             setConversations(prev => {
                 const safeList = Array.isArray(prev) ? prev : [];
@@ -115,6 +111,7 @@ export default function Inbox() {
                 );
             });
         },
+        // message:new
         (newMessage: Message) => {
             if (newMessage.conversationId === selectedConvId) {
                 setMessages(prev => {
@@ -122,70 +119,167 @@ export default function Inbox() {
                     return [...prev, newMessage];
                 });
             }
+        },
+        // conversation:new — trata como update para aparecer na lista
+        undefined,
+        // onReconnect — socket reconectou (ex.: WhatsApp voltou): recarrega tudo
+        () => {
+            loadConversations();
+            if (selectedConvId) loadMessages(selectedConvId);
         }
     );
 
     const handleSelectConversation = (id: string) => setSelectedConvId(id);
 
+    const handleStartConversation = async (phone: string) => {
+        setIsStartingConversation(true);
+        setStartConversationError(null);
+
+        try {
+            const result = await apiRequest<{ conversation: Conversation; created: boolean; hasWhatsApp: boolean }>('/api/conversations/start', {
+                method: 'POST',
+                body: JSON.stringify({ phone }),
+            });
+
+            setConversations((prev) => {
+                const safeList = Array.isArray(prev) ? prev : [];
+                const exists = safeList.some((conversation) => conversation.id === result.conversation.id);
+                const nextList = exists
+                    ? safeList.map((conversation) => conversation.id === result.conversation.id ? result.conversation : conversation)
+                    : [result.conversation, ...safeList];
+
+                return nextList.sort(
+                    (a, b) => new Date((b.lastMessageAt as any) || b.startedAt || b.createdAt || 0).getTime()
+                        - new Date((a.lastMessageAt as any) || a.startedAt || a.createdAt || 0).getTime()
+                );
+            });
+            setSelectedConvId(result.conversation.id);
+            setActiveTab(result.conversation.status === 'OPEN' ? 'fila' : 'chats');
+            loadMessages(result.conversation.id);
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setStartConversationError(err instanceof Error ? err.message : 'Erro ao iniciar conversa.');
+            }
+        } finally {
+            setIsStartingConversation(false);
+        }
+    };
+
     const handleTakeConversation = () => {
         if (!selectedConvId) return;
-        fetch(`http://localhost:3334/api/conversations/${selectedConvId}/take`, { method: 'POST', headers })
-            .then(res => { if (!handle401(res)) loadConversations(); })
-            .catch(console.error);
+        apiRequest(`/api/conversations/${selectedConvId}/take`, { method: 'POST' })
+            .then(() => loadConversations())
+            .catch(handleApiError);
     };
 
     const handleSendMessage = (body: string) => {
         if (!selectedConvId || !body.trim()) return;
         setIsSubmitting(true);
-        fetch(`http://localhost:3334/api/conversations/${selectedConvId}/messages`, {
+        setSendError(null);
+        apiRequest(`/api/conversations/${selectedConvId}/messages`, {
             method: 'POST',
-            headers,
             body: JSON.stringify({ body })
         })
-            .then(res => { if (!handle401(res)) loadConversations(); })
-            .catch(console.error)
+            .then(() => loadConversations())
+            .catch((err) => {
+                if (!redirectOnUnauthorized(err, navigate)) {
+                    setSendError(err instanceof Error ? err.message : 'Erro ao enviar mensagem.');
+                }
+            })
             .finally(() => setIsSubmitting(false));
     };
 
     const handleTransfer = (departmentId: string) => {
         if (!selectedConvId) return;
-        fetch(`http://localhost:3334/api/conversations/${selectedConvId}/transfer`, {
+        apiRequest(`/api/conversations/${selectedConvId}/transfer`, {
             method: 'POST',
-            headers,
             body: JSON.stringify({ departmentId })
         })
-            .then(res => { if (!handle401(res)) loadConversations(); })
-            .catch(console.error);
+            .then(() => loadConversations())
+            .catch(handleApiError);
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('sigma-token');
-        navigate('/login');
+    const handleCloseConversation = async () => {
+        if (!selectedConvId) return;
+        setIsClosingConversation(true);
+        setSendError(null);
+
+        try {
+            const closedConversation = await apiRequest<Conversation>(`/api/inbox/conversations/${selectedConvId}/close`, {
+                method: 'POST',
+            });
+            setConversations((prev) => {
+                const safeList = Array.isArray(prev) ? prev : [];
+                return safeList.map((conversation) => (
+                    conversation.id === closedConversation.id ? { ...conversation, ...closedConversation } : conversation
+                ));
+            });
+            setActiveTab('historico');
+            loadMessages(selectedConvId);
+            loadConversations();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setSendError(err instanceof Error ? err.message : 'Erro ao encerrar conversa.');
+            }
+        } finally {
+            setIsClosingConversation(false);
+        }
+    };
+
+    const handleCreateTicket = async (payload: { title: string; priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'; description?: string | null }) => {
+        if (!selectedConvId) return;
+        setIsCreatingTicket(true);
+        setCreateTicketError(null);
+
+        try {
+            await apiRequest(`/api/inbox/conversations/${selectedConvId}/tickets`, {
+                method: 'POST',
+                body: JSON.stringify(payload),
+            });
+            loadConversations();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                const message = err instanceof Error ? err.message : 'Erro ao criar chamado.';
+                setCreateTicketError(message);
+                throw err;
+            }
+        } finally {
+            setIsCreatingTicket(false);
+        }
     };
 
     // Guard defensivo — sempre array mesmo se algo inesperado acontecer
     const safeConversations = Array.isArray(conversations) ? conversations : [];
     const selectedConv = safeConversations.find(c => c.id === selectedConvId) ?? null;
-    const mockUser = { nome: 'Admin', role: 'Administrador' };
+    const visibleConversations = activeTab === 'fila'
+        ? safeConversations.filter((conversation) => conversation.status === 'OPEN')
+        : activeTab === 'chats'
+            ? safeConversations.filter((conversation) => conversation.status === 'ASSIGNED')
+            : activeTab === 'historico'
+                ? safeConversations.filter((conversation) => conversation.status === 'CLOSED')
+                : safeConversations.filter((conversation, index, list) => (
+                    list.findIndex((item) => item.contactId === conversation.contactId) === index
+                ));
 
     // Não renderiza conteúdo enquanto redireciona
     if (unauthorized) return null;
 
     return (
-        <div className="flex w-full h-screen bg-background overflow-hidden text-foreground font-sans relative">
+        <div className="relative flex h-screen w-full flex-col overflow-hidden bg-background pb-16 font-sans text-foreground md:flex-row md:pb-0">
             {!isConnected && (
                 <div className="absolute top-2 left-1/2 transform -translate-x-1/2 bg-warning-soft text-warning-fg px-3 py-1 rounded-full text-xs font-medium border border-warning/30 shadow-lifted z-50 flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-warning animate-pulse"></span>
                     Reconectando...
                 </div>
             )}
-            <SigmaSidebarIcon user={mockUser} onLogout={handleLogout} />
+            <SigmaSidebarIcon user={user} onLogout={logout} />
             <ConversationList
-                conversations={safeConversations.filter(c =>
-                    activeTab === 'fila' ? c.status === 'OPEN' : c.status !== 'OPEN'
-                )}
+                conversations={visibleConversations}
                 selectedId={selectedConvId}
                 onSelect={handleSelectConversation}
+                onStartConversation={handleStartConversation}
+                isStartingConversation={isStartingConversation}
+                startConversationError={startConversationError}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
             />
@@ -194,9 +288,17 @@ export default function Inbox() {
                 messages={messages}
                 isLoading={isLoadingMessages}
                 isSubmitting={isSubmitting}
+                sendError={sendError}
                 onTake={handleTakeConversation}
                 onSend={handleSendMessage}
                 onTransfer={handleTransfer}
+                onCloseConversation={handleCloseConversation}
+                onCreateTicket={handleCreateTicket}
+                onBack={() => setSelectedConvId(null)}
+                isClosingConversation={isClosingConversation}
+                isCreatingTicket={isCreatingTicket}
+                createTicketError={createTicketError}
+                departments={departments}
                 hasMore={hasMoreMessages}
                 onLoadMore={loadMoreMessages}
             />

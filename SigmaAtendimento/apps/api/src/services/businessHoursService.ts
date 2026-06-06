@@ -12,14 +12,20 @@ const defaultBusinessHours = [
     { status: 'CLOSED', startTime: '08:00', endTime: '12:00' }, // 6: Saturday
 ];
 
-export async function getCurrentSettings(): Promise<Settings> {
-    const settings = await prisma.settings.findFirst();
+export async function getCurrentSettings(companyId?: string): Promise<Settings> {
+    const settings = companyId
+        ? await prisma.settings.findUnique({ where: { companyId } })
+        : await prisma.settings.findFirst();
+
     if (settings) {
         return settings;
     }
 
     // If no settings exist, grab the first company and create default settings
-    const company = await prisma.company.findFirst();
+    const company = companyId
+        ? await prisma.company.findUnique({ where: { id: companyId } })
+        : await prisma.company.findFirst({ orderBy: { createdAt: 'asc' } });
+
     if (!company) {
         throw new Error("No company found. Cannot create default settings.");
     }

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { Icon, type IconName } from '../components/ui/Icon';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 type ReportRange = '1d' | '7d' | '15d' | '30d' | '60d' | '90d';
 
@@ -29,8 +30,6 @@ const ranges: Array<{ value: ReportRange; label: string }> = [
     { value: '60d', label: '60 dias' },
     { value: '90d', label: '90 dias' },
 ];
-
-const mockUser = { nome: 'Admin', role: 'Administrador' };
 
 function Kpi({ title, value, detail, icon, tone }: { title: string; value: string | number; detail: string; icon: IconName; tone: string }) {
     return (
@@ -82,6 +81,7 @@ function RankedList({ title, icon, items, labelKey }: { title: string; icon: Ico
 
 export default function Dashboard() {
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
     const [range, setRange] = useState<ReportRange>('7d');
     const [data, setData] = useState<DashboardData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -106,15 +106,10 @@ export default function Dashboard() {
         return Math.round((data.metrics.totalTicketsResolved / data.metrics.totalTicketsOpened) * 100);
     }, [data]);
 
-    const handleLogout = () => {
-        localStorage.removeItem('sigma-token');
-        navigate('/login');
-    };
-
     return (
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
-            <SigmaSidebarIcon user={mockUser} onLogout={handleLogout} />
-            <main className="flex-1 overflow-y-auto">
+            <SigmaSidebarIcon user={user} onLogout={logout} />
+            <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
                 <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-8 p-6 lg:p-10">
                     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                         <div>
@@ -152,7 +147,7 @@ export default function Dashboard() {
                                 <Kpi title="Mensagens" value={data.metrics.totalMessages} detail="Mensagens trafegadas" icon="chat" tone="bg-sky-500/10 text-sky-600" />
                                 <Kpi title="Chamados" value={data.metrics.totalTicketsOpened} detail="Tickets criados" icon="confirmation_number" tone="bg-amber-500/10 text-amber-600" />
                                 <Kpi title="Resolucao" value={`${resolutionRate}%`} detail={`${data.metrics.totalTicketsResolved} resolvidos`} icon="task_alt" tone="bg-emerald-500/10 text-emerald-600" />
-                                <Kpi title="CSAT" value={data.metrics.csat?.average ? data.metrics.csat.average.toFixed(1) : '-'} detail={`${data.metrics.csat?.count || 0} avaliacao(oes)`} icon="sentiment_satisfied" tone="bg-violet-500/10 text-violet-600" />
+                                <Kpi title="CSAT" value={data.metrics.csat?.average ? `${data.metrics.csat.average.toFixed(1)} / 5` : '-'} detail={`${data.metrics.csat?.count || 0} avaliação(ões)`} icon="sentiment_satisfied" tone="bg-success-soft text-success-fg" />
                             </div>
 
                             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">

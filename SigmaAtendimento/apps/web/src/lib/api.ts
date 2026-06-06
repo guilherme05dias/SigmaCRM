@@ -1,3 +1,5 @@
+import { clearAuthToken, getAuthToken } from './authToken';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3334';
 
 export class ApiError extends Error {
@@ -12,7 +14,7 @@ type ApiOptions = RequestInit & {
 
 export async function apiRequest<T>(path: string, options: ApiOptions = {}): Promise<T> {
     const { auth = true, headers, ...rest } = options;
-    const token = localStorage.getItem('sigma-token');
+    const token = getAuthToken();
 
     const response = await fetch(`${API_BASE_URL}${path}`, {
         ...rest,
@@ -37,7 +39,7 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
 
 export function redirectOnUnauthorized(error: unknown, navigate: (path: string) => void) {
     if (error instanceof ApiError && error.status === 401) {
-        localStorage.removeItem('sigma-token');
+        clearAuthToken();
         navigate('/login');
         return true;
     }

@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
 import { SigmaMetricCard } from '../components/sigma/SigmaMetricCard';
 import { Icon } from '../components/ui/Icon';
+import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 interface MetricsData {
     range: string;
@@ -20,9 +22,11 @@ interface MetricsData {
 
 export default function Reports() {
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
     const [range, setRange] = useState('7d');
     const [data, setData] = useState<MetricsData | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     const ranges = [
         { value: '1d', label: 'Hoje' },
@@ -35,33 +39,23 @@ export default function Reports() {
 
     useEffect(() => {
         setLoading(true);
-        const token = localStorage.getItem('sigma-token') || '';
-        fetch(`http://localhost:3334/api/reports/summary?range=${range}`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        })
-            .then(res => res.json())
+        setError(null);
+        apiRequest<MetricsData>(`/api/reports/summary?range=${range}`)
             .then(resData => {
                 setData(resData);
-                setLoading(false);
             })
             .catch(err => {
-                console.error(err);
-                setLoading(false);
-            });
-    }, [range]);
-
-    const handleLogout = () => {
-        localStorage.removeItem('sigma-token');
-        navigate('/login');
-    };
-
-    const mockUser = { nome: 'Admin', role: 'Administrador' };
+                if (!redirectOnUnauthorized(err, navigate)) {
+                    setError(err instanceof Error ? err.message : 'Erro ao carregar relatórios.');
+                    setData(null);
+                }
+            })
+            .finally(() => setLoading(false));
+    }, [range, navigate]);
 
     return (
         <div className="flex flex-col min-h-screen bg-background text-foreground font-sans">
-            <SigmaTopbar user={mockUser} onLogout={handleLogout} />
+            <SigmaTopbar user={user} onLogout={logout} />
 
             <main className="flex-1 max-w-[1440px] mx-auto w-full p-6 lg:p-10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -92,7 +86,7 @@ export default function Reports() {
                     </div>
                 ) : !data ? (
                     <div className="text-center py-20 text-muted-foreground bg-surface rounded-xl border border-border shadow-card">
-                        Erro ao carregar dados.
+                        {error || 'Erro ao carregar dados.'}
                     </div>
                 ) : (
                     <div className="flex flex-col gap-8">

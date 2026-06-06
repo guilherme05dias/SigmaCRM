@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { TicketChannel, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
 import { prisma } from '../lib/prisma';
-import { getIO } from '../socket';
+import { emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { companyScope, getCompanyId } from '../lib/tenant';
 import { generateProtocol } from '../services/protocol.service';
@@ -82,9 +82,10 @@ function extractFieldService(data: Record<string, any>) {
 // LISTAR (escopado por empresa)
 router.get('/', async (req, res) => {
     try {
-        const { status, contactId, customerId, assignedUserId, departmentId } = req.query;
+        const { status, priority, contactId, customerId, assignedUserId, departmentId } = req.query;
         const where: any = { ...companyScope(req) };
         if (status) where.status = status;
+        if (priority) where.priority = priority;
         if (contactId) where.contactId = contactId;
         if (customerId) where.customerId = customerId;
         if (assignedUserId) where.assignedUserId = assignedUserId;
@@ -155,7 +156,7 @@ router.post('/', async (req, res) => {
             return tx.ticket.findUnique({ where: { id: created.id }, include: ticketInclude });
         });
 
-        getIO().emit('ticket:new', ticket);
+        emitToCompany(companyId, 'ticket:new', ticket);
         res.status(201).json(ticket);
     } catch (error: any) {
         res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to create ticket' });
@@ -214,7 +215,7 @@ router.patch('/:id', async (req, res) => {
             return tx.ticket.findUnique({ where: { id: existing.id }, include: ticketInclude });
         });
 
-        getIO().emit('ticket:updated', ticket);
+        emitToCompany(companyId, 'ticket:updated', ticket);
         res.json(ticket);
     } catch (error: any) {
         res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to update ticket' });

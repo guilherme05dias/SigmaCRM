@@ -2,49 +2,142 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ───────────────────────────────────────────────────────────────────────────
-   Sigma — base layer (trust-blue light)
-   Tokens e racional do design system em docs/M2_NOTES.md.
-─────────────────────────────────────────────────────────────────────────── */
-@layer base {
-  :root {
-    color-scheme: light;
-  }
+/* ═══════════════════════════════════════════════════════════════════════════
+   Sigma Design System — CSS Custom Properties
+   Referência: nexu-io/open-design/.../airtable/DESIGN.md
+   Cores que precisam de opacidade usam canais RGB separados (sem rgb() wrapper)
+   para que Tailwind gere bg-X/20, ring-X/40, etc. corretamente.
+═══════════════════════════════════════════════════════════════════════════ */
 
-  html {
-    -webkit-text-size-adjust: 100%;
-  }
+/* ── LIGHT (default) ──────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+
+  /* Superfícies — hex direto (sem opacidade) */
+  --c-background:    #ffffff;
+  --c-surface:       #ffffff;
+  --c-surface-alt:   #f8fafc;
+  --c-elevated:      #ffffff;
+  --c-border:        #e0e2e6;
+
+  /* Primária — canais RGB (suporta /N opacity) */
+  --c-primary:     27 97 201;    /* #1b61c9 — Airtable Blue */
+  --c-primary-fg:  255 255 255;
+  --c-primary-50:  239 245 253;
+  --c-primary-100: 219 233 250;
+  --c-primary-200: 184 211 245;
+  --c-primary-300: 133 178 238;
+  --c-primary-400:  77 135 226;
+  --c-primary-500:  44 109 213;
+  --c-primary-600:  27  97 201;
+  --c-primary-700:  37  79 173;  /* #254fad — Mid Blue hover */
+  --c-primary-800:  30  61 135;
+  --c-primary-900:  26  47 107;
+
+  /* Conteúdo — canais RGB */
+  --c-foreground: 24 29 38;      /* #181d26 — Deep Navy */
+  --c-muted-fg:   82 89 101;     /* #525965 — rgba(4,14,32,0.69) em branco */
+
+  /* Status — canais RGB para DEFAULT + hex para soft/fg */
+  --c-success:      0 100   0;
+  --c-success-soft: #dcfce7;
+  --c-success-fg:   #014e01;
+
+  --c-warning:    217 119   6;
+  --c-warning-soft: #fef3c7;
+  --c-warning-fg:   #92400e;
+
+  --c-danger:     220  38  38;
+  --c-danger-soft: #fee2e2;
+  --c-danger-fg:   #991b1b;
+
+  --c-info:        27  97 201;
+  --c-info-soft:  #dbe9fa;
+  --c-info-fg:    #254fad;
+}
+
+/* ── DARK ─────────────────────────────────────────────────────────────────── */
+.dark {
+  color-scheme: dark;
+
+  --c-background:   #111318;
+  --c-surface:      #1a1d25;
+  --c-surface-alt:  #222630;
+  --c-elevated:     #222630;
+  --c-border:       #2d3748;
+
+  --c-primary:     79 148 246;   /* #4f94f6 — Airtable Blue mais vivo no dark */
+  --c-primary-fg:  255 255 255;
+  --c-primary-50:   19  38  70;
+  --c-primary-100:  27  53  99;
+  --c-primary-200:  35  75 143;
+  --c-primary-300:  58 105 190;
+  --c-primary-400:  79 148 246;
+  --c-primary-500: 110 170 255;
+  --c-primary-600: 139 190 255;
+  --c-primary-700: 163 205 255;
+  --c-primary-800: 199 225 255;
+  --c-primary-900: 224 240 255;
+
+  --c-foreground: 226 232 240;   /* #e2e8f0 */
+  --c-muted-fg:   148 163 184;   /* #94a3b8 */
+
+  --c-success:     74 222 128;
+  --c-success-soft: #0d2b12;
+  --c-success-fg:   #86efac;
+
+  --c-warning:    251 191  36;
+  --c-warning-soft: #2d1e08;
+  --c-warning-fg:   #fcd34d;
+
+  --c-danger:     248  81  73;
+  --c-danger-soft: #2d1214;
+  --c-danger-fg:   #fca5a5;
+
+  --c-info:        79 148 246;
+  --c-info-soft:  #1a2a4a;
+  --c-info-fg:    #93c5fd;
+}
+
+/* ── BASE LAYER ───────────────────────────────────────────────────────────── */
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
 
   body {
-    @apply bg-background text-foreground font-sans;
+    background-color: var(--c-background);
+    color: rgb(var(--c-foreground));
+    font-family: theme('fontFamily.sans');
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
   }
 
   h1, h2, h3, h4, h5 {
-    @apply font-display font-semibold tracking-tight text-foreground;
+    @apply font-display tracking-wide;
+    font-weight: 400;
+    color: rgb(var(--c-foreground));
   }
 
-  /* Foco visível e consistente em tudo que é interativo (acessibilidade) */
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
-    @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-background rounded-default;
+    outline: none;
+    box-shadow: 0 0 0 2px var(--c-background), 0 0 0 4px rgba(79,148,246,0.40);
+    border-radius: theme('borderRadius.xl');
   }
 }
 
+/* ── UTILITIES ────────────────────────────────────────────────────────────── */
 @layer utilities {
-  /* Scrollbar discreta no tema claro */
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #CBD5E1 transparent;
+    scrollbar-color: var(--c-border) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: #CBD5E1;
+    background-color: var(--c-border);
     border-radius: 9999px;
   }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 }
 
-/* Respeita quem prefere menos movimento */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

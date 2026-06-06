@@ -1,4 +1,4 @@
-import { IWhatsAppProvider, ParsedIncomingPayload } from "../IWhatsAppProvider";
+import { IWhatsAppProvider, ParsedIncomingPayload, WhatsAppHistoryChat, WhatsAppHistorySyncOptions } from "../IWhatsAppProvider";
 import { metaCloudConfig } from "../config/metaCloud.config";
 import { MetaCloudWebhookPayload } from "../config/metaCloud.types";
 
@@ -76,8 +76,22 @@ export class MetaCloudWhatsAppProvider implements IWhatsAppProvider {
         return [];
     }
 
+    async checkContact(phone: string): Promise<{ exists: boolean; phone: string; name?: string | null; wid?: string | null }> {
+        const normalizedPhone = phone.replace(/\D/g, '');
+        return { exists: true, phone: normalizedPhone, name: null, wid: `${normalizedPhone}@wa` };
+    }
+
+    async syncHistory(_options: WhatsAppHistorySyncOptions = {}): Promise<WhatsAppHistoryChat[]> {
+        return [];
+    }
+
     async createSession(sessionName?: string): Promise<any> {
         console.log("[MetaCloudWhatsAppProvider] createSession is not applicable for Cloud API");
+        return { message: "Session is managed by Meta Cloud externally" };
+    }
+
+    async disconnectSession(sessionName?: string): Promise<any> {
+        console.log("[MetaCloudWhatsAppProvider] disconnectSession is managed by Meta Cloud externally", sessionName);
         return { message: "Session is managed by Meta Cloud externally" };
     }
 

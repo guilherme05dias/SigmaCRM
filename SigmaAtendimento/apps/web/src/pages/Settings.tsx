@@ -4,15 +4,70 @@ import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
 import { SigmaSettingsCard } from '../components/sigma/SigmaSettingsCard';
 import { Icon } from '../components/ui/Icon';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 interface WhatsAppSession {
     name: string;
     status: string;
 }
 
+interface WhatsAppHistorySyncSummary {
+    ok: boolean;
+    scannedChats: number;
+    importedContacts: number;
+    importedConversations: number;
+    importedMessages: number;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3334';
 const WHATSAPP_SESSION_ID = 'default';
 type SettingsSection = 'business-hours' | 'auto-messages' | 'whatsapp';
+type BusinessHourStatus = 'OPEN' | 'SPECIAL' | 'CLOSED';
+
+interface BusinessHour {
+    day: string;
+    startTime: string;
+    endTime: string;
+    status: BusinessHourStatus;
+}
+
+interface SystemSettings {
+    businessHours: BusinessHour[];
+    welcomeMessage?: string | null;
+    awayMessage?: string | null;
+    closingMessage?: string | null;
+}
+
+const defaultBusinessHours: BusinessHour[] = [
+    { day: 'Segunda-feira', startTime: '08:00', endTime: '18:00', status: 'OPEN' },
+    { day: 'Terça-feira', startTime: '08:00', endTime: '18:00', status: 'OPEN' },
+    { day: 'Quarta-feira', startTime: '08:00', endTime: '18:00', status: 'OPEN' },
+    { day: 'Quinta-feira', startTime: '08:00', endTime: '18:00', status: 'OPEN' },
+    { day: 'Sexta-feira', startTime: '08:00', endTime: '18:00', status: 'OPEN' },
+    { day: 'Sábado', startTime: '09:00', endTime: '13:00', status: 'SPECIAL' },
+    { day: 'Domingo', startTime: '', endTime: '', status: 'CLOSED' },
+];
+
+const defaultSettings: SystemSettings = {
+    businessHours: defaultBusinessHours,
+    welcomeMessage: 'Olá! Seja bem-vindo à Sigma Atendimento. Em instantes um de nossos consultores irá falar com você.',
+    awayMessage: 'No momento estamos fora do nosso horário de atendimento. Deixe sua mensagem e retornaremos assim que possível. Nosso horário é das 08:00 às 18:00.',
+    closingMessage: 'Atendimento encerrado. Se precisar de algo, envie uma nova mensagem.',
+};
+
+function normalizeBusinessHours(value: unknown): BusinessHour[] {
+    if (!Array.isArray(value)) return defaultBusinessHours;
+
+    return defaultBusinessHours.map((fallback, index) => {
+        const item = value[index] as Partial<BusinessHour> | undefined;
+        return {
+            day: item?.day || fallback.day,
+            startTime: item?.startTime ?? fallback.startTime,
+            endTime: item?.endTime ?? fallback.endTime,
+            status: item?.status ?? fallback.status,
+        };
+    });
+}
 
 function formatWhatsAppStatus(status: string) {
     const labels: Record<string, string> = {
@@ -31,11 +86,76 @@ function formatWhatsAppStatus(status: string) {
 
 export default function Settings() {
     const navigate = useNavigate();
+    const { user, logout } = useAuth();
     const [activeSection, setActiveSection] = useState<SettingsSection>('business-hours');
     const [sessions, setSessions] = useState<WhatsAppSession[]>([]);
     const [whatsAppLoading, setWhatsAppLoading] = useState(false);
+    const [whatsAppDisconnecting, setWhatsAppDisconnecting] = useState(false);
+    const [whatsAppSyncing, setWhatsAppSyncing] = useState(false);
+    const [whatsAppSyncSummary, setWhatsAppSyncSummary] = useState<WhatsAppHistorySyncSummary | null>(null);
     const [whatsAppError, setWhatsAppError] = useState<string | null>(null);
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+    const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
+    const [settingsLoading, setSettingsLoading] = useState(true);
+    const [settingsSaving, setSettingsSaving] = useState(false);
+    const [settingsError, setSettingsError] = useState<string | null>(null);
+    const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
+
+    const loadSettings = () => {
+        setSettingsLoading(true);
+        setSettingsError(null);
+
+        apiRequest<SystemSettings>('/api/settings')
+            .then((data) => {
+                setSettings({
+                    businessHours: normalizeBusinessHours(data.businessHours),
+                    welcomeMessage: data.welcomeMessage ?? defaultSettings.welcomeMessage,
+                    awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
+                    closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
+                });
+            })
+            .catch((err) => {
+                if (!redirectOnUnauthorized(err, navigate)) {
+                    setSettingsError(err instanceof Error ? err.message : 'Erro ao carregar configurações.');
+                }
+            })
+            .finally(() => setSettingsLoading(false));
+    };
+
+    const saveSettings = async () => {
+        setSettingsSaving(true);
+        setSettingsError(null);
+        setSettingsSuccess(null);
+
+        try {
+            const data = await apiRequest<SystemSettings>('/api/settings', {
+                method: 'PUT',
+                body: JSON.stringify({ ...settings, businessHours: normalizeBusinessHours(settings.businessHours) }),
+            });
+            setSettings({
+                businessHours: normalizeBusinessHours(data.businessHours),
+                welcomeMessage: data.welcomeMessage ?? defaultSettings.welcomeMessage,
+                awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
+                closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
+            });
+            setSettingsSuccess('Configurações salvas.');
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setSettingsError(err instanceof Error ? err.message : 'Erro ao salvar configurações.');
+            }
+        } finally {
+            setSettingsSaving(false);
+        }
+    };
+
+    const updateBusinessHour = (index: number, patch: Partial<BusinessHour>) => {
+        setSettings((current) => ({
+            ...current,
+            businessHours: current.businessHours.map((item, itemIndex) => (
+                itemIndex === index ? { ...item, ...patch } : item
+            )),
+        }));
+    };
 
     const loadWhatsAppQrCode = () => {
         apiRequest<{ qrCodeDataUrl?: string }>(`/api/whatsapp/sessions/${WHATSAPP_SESSION_ID}/qrcode-image`)
@@ -43,23 +163,23 @@ export default function Settings() {
             .catch(() => setQrCodeDataUrl(null));
     };
 
-    const loadWhatsAppSessions = () => {
-        apiRequest<WhatsAppSession[]>('/api/whatsapp/sessions')
-            .then((data) => {
-                setSessions(data);
-                const session = data.find((item) => item.name === WHATSAPP_SESSION_ID);
-                if (session && ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING', 'STARTING', 'AUTHENTICATED'].includes(session.status)) {
-                    loadWhatsAppQrCode();
-                }
-            })
-            .catch((err) => {
-                if (!redirectOnUnauthorized(err, navigate)) {
-                    setWhatsAppError(err instanceof Error ? err.message : 'Erro ao consultar sessão WhatsApp.');
-                }
-            });
+    const loadWhatsAppSessions = async () => {
+        try {
+            const data = await apiRequest<WhatsAppSession[]>('/api/whatsapp/sessions');
+            setSessions(data);
+            const session = data.find((item) => item.name === WHATSAPP_SESSION_ID);
+            if (session && ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING', 'STARTING', 'AUTHENTICATED'].includes(session.status)) {
+                loadWhatsAppQrCode();
+            }
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setWhatsAppError(err instanceof Error ? err.message : 'Erro ao consultar sessão WhatsApp.');
+            }
+        }
     };
 
     useEffect(() => {
+        loadSettings();
         loadWhatsAppSessions();
     }, []);
 
@@ -75,8 +195,20 @@ export default function Settings() {
 
     const currentWhatsAppSession = sessions.find((session) => session.name === WHATSAPP_SESSION_ID);
     const whatsAppStatus = currentWhatsAppSession?.status || 'NAO_INICIADO';
-    const hasQrCode = ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING', 'STARTING', 'AUTHENTICATED'].includes(whatsAppStatus);
+    const hasQrCode = ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
+    const isAuthenticated = whatsAppStatus === 'AUTHENTICATED';
+    const isStarting = whatsAppStatus === 'STARTING';
     const isConnected = ['READY', 'CONNECTED', 'WORKING'].includes(whatsAppStatus);
+    const canDisconnect = ['READY', 'CONNECTED', 'WORKING', 'AUTHENTICATED', 'STARTING', 'QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
+    const statusText = isConnected
+        ? 'Conectado'
+        : isAuthenticated
+            ? 'Autenticado, finalizando conexão'
+            : isStarting
+                ? 'Iniciando sessão'
+                : hasQrCode
+                    ? 'Aguardando leitura do QR Code'
+                    : 'Não conectado';
 
     const startWhatsAppSession = async () => {
         setWhatsAppLoading(true);
@@ -96,12 +228,42 @@ export default function Settings() {
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('sigma-token');
-        navigate('/login');
+    const disconnectWhatsAppSession = async () => {
+        setWhatsAppDisconnecting(true);
+        setWhatsAppError(null);
+
+        try {
+            await apiRequest(`/api/whatsapp/sessions/${WHATSAPP_SESSION_ID}/disconnect`, { method: 'POST' });
+            setQrCodeDataUrl(null);
+            await loadWhatsAppSessions();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setWhatsAppError(err instanceof Error ? err.message : 'Erro ao desconectar WhatsApp.');
+            }
+        } finally {
+            setWhatsAppDisconnecting(false);
+        }
     };
 
-    const mockUser = { nome: 'Admin', role: 'Administrador' };
+    const syncWhatsAppHistory = async () => {
+        setWhatsAppSyncing(true);
+        setWhatsAppError(null);
+        setWhatsAppSyncSummary(null);
+
+        try {
+            const summary = await apiRequest<WhatsAppHistorySyncSummary>(`/api/whatsapp/sessions/${WHATSAPP_SESSION_ID}/sync-history`, {
+                method: 'POST',
+                body: JSON.stringify({ chatLimit: 100, messageLimit: 50 }),
+            });
+            setWhatsAppSyncSummary(summary);
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setWhatsAppError(err instanceof Error ? err.message : 'Erro ao sincronizar histórico do WhatsApp.');
+            }
+        } finally {
+            setWhatsAppSyncing(false);
+        }
+    };
 
     const settingsNavClass = (section: SettingsSection) => {
         const isActive = activeSection === section;
@@ -119,7 +281,7 @@ export default function Settings() {
 
     return (
         <div className="relative flex flex-col w-full h-full min-h-screen overflow-x-hidden bg-background font-sans text-foreground">
-            <SigmaTopbar user={mockUser} onLogout={handleLogout} />
+            <SigmaTopbar user={user} onLogout={logout} />
 
             <main className="flex flex-1 flex-col md:flex-row max-w-7xl mx-auto w-full p-4 md:p-8 gap-8">
                 {/* Left Sidebar Navigation */}
@@ -156,12 +318,32 @@ export default function Settings() {
 
                 {/* Main Content Area */}
                 <div className="flex-1 flex flex-col gap-8">
+                    {settingsError && (
+                        <div className="rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">
+                            {settingsError}
+                        </div>
+                    )}
+                    {settingsSuccess && (
+                        <div className="rounded-lg border border-success/20 bg-success-soft p-3 text-sm text-success-fg">
+                            {settingsSuccess}
+                        </div>
+                    )}
+
                     {/* Business Hours Section */}
                     <div id="business-hours" className="scroll-mt-24">
                         <SigmaSettingsCard
                             title="Horário de Funcionamento"
                             description="Defina os intervalos de disponibilidade da sua equipe."
-                            actionButton={<button className="bg-primary text-white px-4 py-2 rounded-pill text-sm font-semibold hover:bg-primary-700 transition-colors cursor-pointer">Salvar Alterações</button>}
+                            actionButton={
+                                <button
+                                    type="button"
+                                    onClick={saveSettings}
+                                    disabled={settingsSaving || settingsLoading}
+                                    className="bg-primary text-white px-4 py-2 rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                >
+                                    {settingsSaving ? 'Salvando...' : 'Salvar Alterações'}
+                                </button>
+                            }
                         >
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left text-sm">
@@ -174,40 +356,40 @@ export default function Settings() {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-border">
-                                    {['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira'].map(day => (
-                                        <tr key={day} className="hover:bg-surface-alt transition-colors">
-                                            <td className="px-6 py-4 font-medium">{day}</td>
+                                    {settings.businessHours.map((item, index) => (
+                                        <tr key={item.day} className="hover:bg-surface-alt transition-colors">
+                                            <td className="px-6 py-4 font-medium">{item.day}</td>
                                             <td className="px-6 py-4 text-center">
-                                                <input type="time" defaultValue="08:00" className="bg-surface border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                                                <input
+                                                    type="time"
+                                                    value={item.startTime}
+                                                    disabled={item.status === 'CLOSED'}
+                                                    onChange={(event) => updateBusinessHour(index, { startTime: event.target.value })}
+                                                    className="bg-surface border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50"
+                                                />
                                             </td>
                                             <td className="px-6 py-4 text-center">
-                                                <input type="time" defaultValue="18:00" className="bg-surface border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+                                                <input
+                                                    type="time"
+                                                    value={item.endTime}
+                                                    disabled={item.status === 'CLOSED'}
+                                                    onChange={(event) => updateBusinessHour(index, { endTime: event.target.value })}
+                                                    className="bg-surface border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary disabled:opacity-50"
+                                                />
                                             </td>
                                             <td className="px-6 py-4 text-right">
-                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-success-soft text-success-fg">Aberto</span>
+                                                <select
+                                                    value={item.status}
+                                                    onChange={(event) => updateBusinessHour(index, { status: event.target.value as BusinessHourStatus })}
+                                                    className="rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                                >
+                                                    <option value="OPEN">Aberto</option>
+                                                    <option value="SPECIAL">Especial</option>
+                                                    <option value="CLOSED">Fechado</option>
+                                                </select>
                                             </td>
                                         </tr>
                                     ))}
-                                    <tr className="bg-surface-alt transition-colors">
-                                        <td className="px-6 py-4 font-medium">Sábado</td>
-                                        <td className="px-6 py-4 text-center">
-                                            <input type="time" defaultValue="09:00" className="bg-surface border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                                        </td>
-                                        <td className="px-6 py-4 text-center">
-                                            <input type="time" defaultValue="13:00" className="bg-surface border border-border rounded px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
-                                        </td>
-                                        <td className="px-6 py-4 text-right">
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-surface-alt text-muted-foreground border border-border">Especial</span>
-                                        </td>
-                                    </tr>
-                                    <tr className="hover:bg-surface-alt transition-colors">
-                                        <td className="px-6 py-4 font-medium">Domingo</td>
-                                        <td className="px-6 py-4 text-center text-muted-foreground">-</td>
-                                        <td className="px-6 py-4 text-center text-muted-foreground">-</td>
-                                        <td className="px-6 py-4 text-right">
-                                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-danger-soft text-danger-fg border border-danger/20">Fechado</span>
-                                        </td>
-                                    </tr>
                                 </tbody>
                                 </table>
                             </div>
@@ -219,13 +401,24 @@ export default function Settings() {
                         <SigmaSettingsCard
                             title="Mensagens Automáticas"
                             description="Respostas instantâneas para diferentes situações."
+                            actionButton={
+                                <button
+                                    type="button"
+                                    onClick={saveSettings}
+                                    disabled={settingsSaving || settingsLoading}
+                                    className="bg-primary text-white px-4 py-2 rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                >
+                                    {settingsSaving ? 'Salvando...' : 'Salvar Mensagens'}
+                                </button>
+                            }
                         >
                             <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="flex flex-col gap-2">
                                 <label className="text-sm font-bold text-foreground">Mensagem de Saudação</label>
                                 <textarea
                                     className="w-full bg-surface border border-border rounded-xl p-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all min-h-[120px] resize-none"
-                                    defaultValue="Olá! Seja bem-vindo à Sigma Atendimento. Em instantes um de nossos consultores irá falar com você."
+                                    value={settings.welcomeMessage || ''}
+                                    onChange={(event) => setSettings((current) => ({ ...current, welcomeMessage: event.target.value }))}
                                 />
                                 <p className="text-[10px] text-muted-foreground">Enviada no primeiro contato do dia de cada cliente.</p>
                             </div>
@@ -233,7 +426,8 @@ export default function Settings() {
                                 <label className="text-sm font-bold text-foreground">Mensagem de Ausência</label>
                                 <textarea
                                     className="w-full bg-surface border border-border rounded-xl p-4 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all min-h-[120px] resize-none"
-                                    defaultValue="No momento estamos fora do nosso horário de atendimento. Deixe sua mensagem e retornaremos assim que possível. Nosso horário é das 08:00 às 18:00."
+                                    value={settings.awayMessage || ''}
+                                    onChange={(event) => setSettings((current) => ({ ...current, awayMessage: event.target.value }))}
                                 />
                                 <p className="text-[10px] text-muted-foreground">Enviada automaticamente fora do horário configurado.</p>
                             </div>
@@ -247,13 +441,36 @@ export default function Settings() {
                             title="Conexão WhatsApp"
                             description="Conecte o canal WhatsApp Web usado no atendimento."
                             actionButton={
-                                <button
-                                    onClick={startWhatsAppSession}
-                                    disabled={whatsAppLoading}
-                                    className="px-4 py-2 bg-primary text-white rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
-                                >
-                                    {whatsAppLoading ? 'Conectando...' : isConnected ? 'Reconectar' : 'Conectar WhatsApp'}
-                                </button>
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                    {isConnected && (
+                                        <button
+                                            type="button"
+                                            onClick={syncWhatsAppHistory}
+                                            disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                            className="px-4 py-2 bg-surface text-foreground rounded-pill text-sm font-semibold border border-border hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                        >
+                                            {whatsAppSyncing ? 'Sincronizando...' : 'Sincronizar histórico'}
+                                        </button>
+                                    )}
+                                    {canDisconnect && (
+                                        <button
+                                            type="button"
+                                            onClick={disconnectWhatsAppSession}
+                                            disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                            className="px-4 py-2 bg-surface text-danger rounded-pill text-sm font-semibold border border-danger/30 hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                        >
+                                            {whatsAppDisconnecting ? 'Desconectando...' : 'Desconectar'}
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={startWhatsAppSession}
+                                        disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                        className="px-4 py-2 bg-primary text-white rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                    >
+                                        {whatsAppLoading ? 'Conectando...' : isConnected ? 'Reconectar' : 'Conectar WhatsApp'}
+                                    </button>
+                                </div>
                             }
                         >
                             <div className="p-6">
@@ -267,8 +484,8 @@ export default function Settings() {
                                     <div>
                                         <p className="text-sm text-muted-foreground">
                                             Status:{' '}
-                                            <span className={`font-bold uppercase text-xs tracking-wider ${isConnected ? 'text-success' : hasQrCode ? 'text-warning' : 'text-muted-foreground'}`}>
-                                                {isConnected ? 'Conectado' : hasQrCode ? 'Aguardando leitura do QR Code' : 'Não conectado'}
+                                            <span className={`font-bold uppercase text-xs tracking-wider ${isConnected ? 'text-success' : (hasQrCode || isAuthenticated || isStarting) ? 'text-warning' : 'text-muted-foreground'}`}>
+                                                {statusText}
                                             </span>
                                         </p>
                                         <p className="mt-1 text-xs text-muted-foreground">Sessão: {WHATSAPP_SESSION_ID}</p>
@@ -276,6 +493,11 @@ export default function Settings() {
                                         {whatsAppError && (
                                             <div className="mt-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">
                                                 {whatsAppError}
+                                            </div>
+                                        )}
+                                        {whatsAppSyncSummary && (
+                                            <div className="mt-4 rounded-lg border border-success/20 bg-success-soft p-3 text-sm text-success-fg">
+                                                Histórico sincronizado: {whatsAppSyncSummary.scannedChats} conversas verificadas, {whatsAppSyncSummary.importedContacts} contatos novos, {whatsAppSyncSummary.importedConversations} conversas novas e {whatsAppSyncSummary.importedMessages} mensagens importadas.
                                             </div>
                                         )}
                                     </div>
@@ -324,8 +546,22 @@ export default function Settings() {
                     </div>
 
                     <div className="flex justify-end gap-3 pb-8">
-                        <button className="bg-surface text-foreground px-6 py-2.5 rounded-pill text-sm font-bold border border-border hover:bg-surface-alt transition-colors cursor-pointer">Cancelar</button>
-                        <button className="bg-primary text-white px-8 py-2.5 rounded-pill text-sm font-bold shadow-primary-glow hover:bg-primary-700 transition-colors cursor-pointer">Salvar Todas as Configurações</button>
+                        <button
+                            type="button"
+                            onClick={loadSettings}
+                            disabled={settingsLoading || settingsSaving}
+                            className="bg-surface text-foreground px-6 py-2.5 rounded-pill text-sm font-bold border border-border hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={saveSettings}
+                            disabled={settingsLoading || settingsSaving}
+                            className="bg-primary text-white px-8 py-2.5 rounded-pill text-sm font-bold shadow-primary-glow hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                        >
+                            {settingsSaving ? 'Salvando...' : 'Salvar Todas as Configurações'}
+                        </button>
                     </div>
                 </div>
             </main>

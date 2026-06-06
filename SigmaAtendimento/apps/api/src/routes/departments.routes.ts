@@ -40,4 +40,17 @@ router.put('/:id', async (req, res) => {
     }
 });
 
+router.delete('/:id', async (req, res) => {
+    try {
+        const result = await prisma.department.updateMany({
+            where: { id: req.params.id, ...companyScope(req) },
+            data: { active: false },
+        });
+        if (result.count === 0) return res.status(404).json({ error: 'Departamento não encontrado' });
+        res.status(204).send();
+    } catch (error) {
+        res.status(400).json({ error: 'Erro ao inativar departamento' });
+    }
+});
+
 export default router;

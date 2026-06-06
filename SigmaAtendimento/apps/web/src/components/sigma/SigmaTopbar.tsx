@@ -1,5 +1,7 @@
-import { Link, useLocation } from 'react-router-dom';
+import { FormEvent, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '../ui/Icon';
+import { ThemeToggle } from '../ui/ThemeToggle';
 
 interface SigmaTopbarProps {
     user: any;
@@ -8,6 +10,17 @@ interface SigmaTopbarProps {
 
 export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
     const location = useLocation();
+    const navigate = useNavigate();
+    const [search, setSearch] = useState('');
+    const [showNotifications, setShowNotifications] = useState(false);
+    const [showAccount, setShowAccount] = useState(false);
+
+    const handleSearch = (event: FormEvent) => {
+        event.preventDefault();
+        const query = search.trim();
+        if (!query) return;
+        navigate(`/customers?query=${encodeURIComponent(query)}`);
+    };
 
     const navLinkClass = (path: string) =>
         `text-sm font-medium transition-colors ${location.pathname === path
@@ -39,39 +52,60 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
                 </div>
 
                 <div className="flex items-center gap-4">
-                    <div className="relative hidden sm:block">
+                    <form onSubmit={handleSearch} className="relative hidden sm:block">
                         <Icon name="search" className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground size-5" />
                         <input
                             type="text"
+                            value={search}
+                            onChange={(event) => setSearch(event.target.value)}
                             placeholder="Pesquisar..."
                             className="bg-surface-alt border border-transparent rounded-pill pl-10 pr-4 py-2 text-sm w-64 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all placeholder:text-muted-foreground"
                         />
-                    </div>
+                    </form>
 
-                    <button className="p-2 text-muted-foreground hover:bg-surface-alt hover:text-foreground rounded-xl transition-colors relative">
-                        <Icon name="notifications" className="size-5" />
-                        {/* Notification dot placeholder */}
-                        <span className="absolute top-1 right-1 size-2 rounded-full bg-primary"></span>
-                    </button>
+                    <ThemeToggle />
+
+                    <div className="relative">
+                        <button
+                            type="button"
+                            onClick={() => setShowNotifications((current) => !current)}
+                            className="p-2 text-muted-foreground hover:bg-surface-alt hover:text-foreground rounded-xl transition-colors relative"
+                            title="Notificações"
+                        >
+                            <Icon name="notifications" className="size-5" />
+                        </button>
+                        {showNotifications && (
+                            <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-border bg-surface p-4 shadow-lifted z-50">
+                                <p className="text-sm font-semibold text-foreground">Notificações</p>
+                                <p className="mt-2 text-sm text-muted-foreground">Nenhuma notificação nova no momento.</p>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="h-8 w-[1px] bg-border mx-2"></div>
 
                     <div className="flex items-center gap-3">
                         <div className="text-right hidden lg:block">
-                            <p className="text-sm font-semibold text-foreground">{user?.nome || 'Usuário'}</p>
+                            <p className="text-sm font-semibold text-foreground">{user?.name || 'Usuário'}</p>
                             <p className="text-xs text-muted-foreground">{user?.role || 'Agente'}</p>
                         </div>
-                        <div className="group relative cursor-pointer">
-                            <div className="size-10 rounded-full border-2 border-primary/20 p-0.5 bg-primary-50 flex items-center justify-center text-primary font-bold">
-                                {user?.nome?.charAt(0).toUpperCase() || 'U'}
-                            </div>
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setShowAccount((current) => !current)}
+                                className="size-10 rounded-full border-2 border-primary/20 p-0.5 bg-primary-50 flex items-center justify-center text-primary font-bold cursor-pointer"
+                                title="Menu da conta"
+                            >
+                                {user?.name?.charAt(0).toUpperCase() || 'U'}
+                            </button>
 
-                            {/* Dropdown Menu */}
-                            <div className="absolute right-0 top-full pt-2 hidden group-hover:block w-32 z-50">
+                            {showAccount && (
+                            <div className="absolute right-0 top-full mt-2 w-40 z-50">
                                 <div className="bg-surface border border-border rounded-lg shadow-lifted py-1 overflow-hidden">
-                                    <button className="w-full text-left px-4 py-2 text-sm text-muted-foreground hover:bg-surface-alt transition-colors">
-                                        Conta
-                                    </button>
+                                    <div className="px-4 py-2 border-b border-border">
+                                        <p className="text-sm font-semibold text-foreground">{user?.name || 'Usuário'}</p>
+                                        <p className="truncate text-xs text-muted-foreground">{user?.email || user?.role || 'Agente'}</p>
+                                    </div>
                                     <button
                                         onClick={onLogout}
                                         className="w-full text-left px-4 py-2 text-sm text-danger hover:bg-danger-soft transition-colors"
@@ -80,6 +114,7 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
                                     </button>
                                 </div>
                             </div>
+                            )}
                         </div>
                     </div>
                 </div>

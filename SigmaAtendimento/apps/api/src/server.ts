@@ -11,8 +11,10 @@ import customersRoutes from './routes/customers.routes';
 import ticketsRoutes from './routes/tickets.routes';
 import inboxRoutes from './routes/inbox.routes';
 import reportsRoutes from './routes/reports.routes';
+import settingsRoutes from './routes/settings.routes';
 import { createServer } from 'http';
 import { initSocket } from './socket';
+import { ensureRuntimeSchema } from './lib/ensureSchema';
 
 dotenv.config();
 
@@ -31,6 +33,7 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/tickets', ticketsRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/settings', settingsRoutes);
 
 app.get('/', (_req, res) => {
     res.json({
@@ -45,6 +48,7 @@ app.get('/', (_req, res) => {
             '/api/tickets',
             '/api/inbox',
             '/api/reports/summary',
+            '/api/settings',
             '/api/whatsapp/sessions',
         ],
     });
@@ -59,6 +63,12 @@ const PORT = process.env.PORT || 3333;
 const httpServer = createServer(app);
 initSocket(httpServer);
 
-httpServer.listen(PORT, () => {
-    console.log(`Server API is running on http://localhost:${PORT}`);
-});
+ensureRuntimeSchema()
+    .catch((error) => {
+        console.error('Failed to ensure runtime schema:', error);
+    })
+    .finally(() => {
+        httpServer.listen(PORT, () => {
+            console.log(`Server API is running on http://localhost:${PORT}`);
+        });
+    });

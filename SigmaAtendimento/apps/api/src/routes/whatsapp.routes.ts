@@ -1,13 +1,64 @@
 import { Router, Request, Response as ExpressResponse } from 'express';
 import { prisma } from '../lib/prisma';
 import { getWhatsAppProvider } from '../whatsapp';
-import { getIO } from '../socket';
-import { getCurrentSettings, isWithinBusinessHours } from '../services/businessHoursService';
+import { getIO, emitToCompany } from '../socket';
+import { getCurrentSettings } from '../services/businessHoursService';
 import { metaCloudConfig } from '../whatsapp/config/metaCloud.config';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
 const muriloApiBaseUrl = (process.env.MURILO_WHATSAPP_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+async function getWebhookCompanyId(): Promise<string> {
+    const configuredCompanyId = process.env.DEFAULT_COMPANY_ID || process.env.SIGMA_DEFAULT_COMPANY_ID;
+
+    if (configuredCompanyId) {
+        const configuredCompany = await prisma.company.findUnique({
+            where: { id: configuredCompanyId },
+            select: { id: true },
+        });
+
+        if (configuredCompany) {
+            return configuredCompany.id;
+        }
+    }
+
+    const company = await prisma.company.findFirst({
+        where: { active: true },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+    }) || await prisma.company.findFirst({
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+    });
+
+    if (!company) {
+        throw new Error('Empresa padrão não encontrada para processar o webhook do WhatsApp.');
+    }
+
+    return company.id;
+}
+
+async function clearWhatsAppOperationalData(): Promise<void> {
+    await prisma.$transaction([
+        prisma.ticketTimeline.deleteMany(),
+        prisma.ticketEvaluation.deleteMany(),
+        prisma.ticketFieldService.deleteMany(),
+        prisma.message.deleteMany(),
+        prisma.ticket.deleteMany(),
+        prisma.conversation.deleteMany(),
+        prisma.whatsAppOutbox.deleteMany(),
+        prisma.whatsAppInboundEvent.deleteMany(),
+        prisma.counter.deleteMany(),
+    ]);
+}
+
+function fromWhatsAppTimestamp(timestamp?: number | null): Date | undefined {
+    if (!timestamp) return undefined;
+    const milliseconds = timestamp > 9999999999 ? timestamp : timestamp * 1000;
+    const date = new Date(milliseconds);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+}
 
 async function readJson<T>(response: globalThis.Response): Promise<T | null> {
     try {
@@ -28,10 +79,163 @@ router.get('/sessions', async (_req: Request, res: ExpressResponse) => {
 
 router.post('/sessions/:sessionId/start', async (req: Request, res: ExpressResponse) => {
     try {
+        await clearWhatsAppOperationalData();
         await whatsappProvider.createSession(req.params.sessionId);
         res.status(202).json({ ok: true });
     } catch (error: any) {
         res.status(500).json({ error: error?.message ?? 'Failed to start WhatsApp session' });
+    }
+});
+
+router.post('/sessions/:sessionId/disconnect', async (req: Request, res: ExpressResponse) => {
+    try {
+        await whatsappProvider.disconnectSession(req.params.sessionId);
+        res.status(200).json({ ok: true, status: 'DISCONNECTED' });
+    } catch (error: any) {
+        res.status(500).json({ error: error?.message ?? 'Failed to disconnect WhatsApp session' });
+    }
+});
+
+router.post('/sessions/:sessionId/sync-history', async (req: Request, res: ExpressResponse) => {
+    try {
+        const companyId = await getWebhookCompanyId();
+        const chatLimit = Math.max(1, Math.min(Number(req.body?.chatLimit || req.query.chatLimit || 100), 500));
+        const messageLimit = Math.max(1, Math.min(Number(req.body?.messageLimit || req.query.messageLimit || 50), 200));
+        const chats = await whatsappProvider.syncHistory({
+            sessionId: req.params.sessionId,
+            chatLimit,
+            messageLimit,
+        });
+
+        let importedContacts = 0;
+        let importedConversations = 0;
+        let importedMessages = 0;
+
+        for (const chat of chats) {
+            const phone = String(chat.phone || '').replace(/\D/g, '');
+            if (phone.length < 10) continue;
+
+            let contact = await prisma.contact.findUnique({ where: { phone } });
+            if (!contact) {
+                contact = await prisma.contact.create({
+                    data: {
+                        companyId,
+                        phone,
+                        name: chat.name || null,
+                    },
+                });
+                importedContacts += 1;
+            } else if (contact.companyId !== companyId || (chat.name && contact.name !== chat.name)) {
+                contact = await prisma.contact.update({
+                    where: { id: contact.id },
+                    data: {
+                        companyId,
+                        ...(chat.name && contact.name !== chat.name ? { name: chat.name } : {}),
+                    },
+                });
+            }
+
+            const sortedMessages = [...chat.messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+            const firstMessageAt = fromWhatsAppTimestamp(sortedMessages[0]?.timestamp);
+            const lastMessageAt = fromWhatsAppTimestamp(chat.lastMessageAt) || fromWhatsAppTimestamp(sortedMessages[sortedMessages.length - 1]?.timestamp) || new Date();
+            const shouldEnterQueue = Boolean(chat.unreadCount && chat.unreadCount > 0);
+
+            let conversation = await prisma.conversation.findFirst({
+                where: {
+                    companyId,
+                    contactId: contact.id,
+                },
+                orderBy: { updatedAt: 'desc' },
+            });
+
+            if (!conversation) {
+                conversation = await prisma.conversation.create({
+                    data: {
+                        companyId,
+                        contactId: contact.id,
+                        status: shouldEnterQueue ? 'OPEN' : 'CLOSED',
+                        startedAt: firstMessageAt || lastMessageAt,
+                        closedAt: shouldEnterQueue ? null : lastMessageAt,
+                        lastMessageAt,
+                    },
+                });
+                importedConversations += 1;
+            } else {
+                conversation = await prisma.conversation.update({
+                    where: { id: conversation.id },
+                    data: {
+                        status: shouldEnterQueue && conversation.status === 'CLOSED' ? 'OPEN' : conversation.status,
+                        closedAt: shouldEnterQueue ? null : conversation.closedAt,
+                        lastMessageAt,
+                    },
+                });
+            }
+
+            const messageIds = sortedMessages
+                .map((message, index) => message.waMessageId || `history_${phone}_${message.timestamp || index}_${message.direction}`)
+                .filter(Boolean);
+            const existingMessages = messageIds.length
+                ? await prisma.message.findMany({
+                    where: {
+                        companyId,
+                        conversationId: conversation.id,
+                        waMessageId: { in: messageIds },
+                    },
+                    select: { waMessageId: true },
+                })
+                : [];
+            const existingMessageIds = new Set(existingMessages.map((message) => message.waMessageId).filter(Boolean));
+
+            for (const [index, message] of sortedMessages.entries()) {
+                const waMessageId = message.waMessageId || `history_${phone}_${message.timestamp || index}_${message.direction}`;
+                if (existingMessageIds.has(waMessageId)) continue;
+
+                await prisma.message.create({
+                    data: {
+                        companyId,
+                        conversationId: conversation.id,
+                        direction: message.direction,
+                        type: message.type,
+                        body: message.body || null,
+                        mediaUrl: message.mediaUrl || null,
+                        waMessageId,
+                        createdAt: fromWhatsAppTimestamp(message.timestamp) || undefined,
+                    },
+                });
+                importedMessages += 1;
+            }
+
+            const updatedConversation = await prisma.conversation.findUnique({
+                where: { id: conversation.id },
+                include: {
+                    contact: true,
+                    assignedUser: { select: { id: true, name: true, email: true } },
+                    department: { select: { id: true, name: true } },
+                    messages: {
+                        orderBy: { createdAt: 'desc' },
+                        take: 1,
+                    },
+                },
+            });
+
+            if (updatedConversation) {
+                emitToCompany(updatedConversation.companyId, 'conversation:updated', updatedConversation);
+                if (shouldEnterQueue) {
+                    emitToCompany(updatedConversation.companyId, 'conversation:new', updatedConversation);
+                }
+            }
+        }
+
+        res.json({
+            ok: true,
+            scannedChats: chats.length,
+            importedContacts,
+            importedConversations,
+            importedMessages,
+        });
+    } catch (error: any) {
+        console.error('Error syncing WhatsApp history:', error);
+        res.status(500).json({ error: error?.message || 'Erro ao sincronizar histórico do WhatsApp' });
     }
 });
 
@@ -147,6 +351,7 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
 
         const phone = parsed.contact.phone;
         const name = parsed.contact.name || undefined;
+        const companyId = await getWebhookCompanyId();
 
         // Find or create Contact
         let contact = await prisma.contact.findUnique({
@@ -155,18 +360,22 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
 
         if (!contact) {
             contact = await prisma.contact.create({
-                data: { phone, name },
+                data: { companyId, phone, name },
             });
-        } else if (name && contact.name !== name) {
+        } else if ((name && contact.name !== name) || contact.companyId !== companyId) {
             contact = await prisma.contact.update({
                 where: { id: contact.id },
-                data: { name },
+                data: {
+                    companyId,
+                    ...(name && contact.name !== name ? { name } : {}),
+                },
             });
         }
 
         // Find or create Conversation
         let conversation = await prisma.conversation.findFirst({
             where: {
+                companyId,
                 contactId: contact.id,
                 status: { in: ['OPEN', 'ASSIGNED'] },
             },
@@ -177,8 +386,10 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
         if (!conversation) {
             conversation = await prisma.conversation.create({
                 data: {
+                    companyId,
                     contactId: contact.id,
                     status: 'OPEN',
+                    startedAt: new Date(),
                 },
             });
             isNewConversation = true;
@@ -189,6 +400,7 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
             if (msg.direction === 'INBOUND') {
                 const message = await prisma.message.create({
                     data: {
+                        companyId,
                         conversationId: conversation.id,
                         direction: 'INBOUND',
                         type: msg.type,
@@ -217,20 +429,22 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
             }
         });
 
-        getIO().emit('conversation:updated', updatedConversation);
+        emitToCompany(companyId, 'conversation:updated', updatedConversation);
+        if (isNewConversation) {
+            emitToCompany(companyId, 'conversation:new', updatedConversation);
+        }
 
         // Auto Messages Logic for New Conversations
         if (isNewConversation) {
             try {
-                const settings = await getCurrentSettings();
-                const isOpen = isWithinBusinessHours(new Date(), settings);
-
-                const autoMessageText = isOpen ? settings.welcomeMessage : settings.awayMessage;
+                const settings = await getCurrentSettings(companyId);
+                const autoMessageText = settings.welcomeMessage;
 
                 if (autoMessageText) {
                     // Save system message
                     const systemMsg = await prisma.message.create({
                         data: {
+                            companyId,
                             conversationId: conversation.id,
                             direction: 'SYSTEM',
                             type: 'TEXT',

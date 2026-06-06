@@ -1,12 +1,13 @@
 /** @type {import('tailwindcss').Config} */
 // ─────────────────────────────────────────────────────────────────────────────
-// Sigma Design System — "trust-blue" (light SaaS)
-// Paleta decidida em docs/ARCHITECTURE_DECISIONS.md: azul de confiança #2563EB,
-// superfícies slate, tipografia Montserrat. Tokens semânticos novos +
-// aliases legados (tema escuro antigo) remapeados para valores claros, de modo
-// que telas ainda não migradas não quebrem o build.
+// Sigma Design System — Airtable-inspired, com dark mode
+// Todas as cores usam CSS Custom Properties para que o dark mode funcione
+// automaticamente via classe .dark no <html>, sem precisar de dark: em cada
+// componente.  Cores que precisam de modificadores de opacidade (bg-X/20 etc.)
+// usam o formato "rgb(var(--c-X) / <alpha-value>)".
 // ─────────────────────────────────────────────────────────────────────────────
 export default {
+    darkMode: 'class',
     content: [
         "./index.html",
         "./src/**/*.{js,ts,jsx,tsx}",
@@ -14,88 +15,121 @@ export default {
     theme: {
         extend: {
             colors: {
-                // ── Brand (trust-blue) ──────────────────────────────────────
+                // ── Brand — suporta opacidade (rgb channels) ────────────────
                 primary: {
-                    DEFAULT: "#2563EB", // blue-600
-                    50: "#EFF6FF",
-                    100: "#DBEAFE",
-                    200: "#BFDBFE",
-                    300: "#93C5FD",
-                    400: "#60A5FA",
-                    500: "#3B82F6",
-                    600: "#2563EB",
-                    700: "#1D4ED8",
-                    800: "#1E40AF",
-                    900: "#1E3A8A",
-                    fg: "#FFFFFF", // texto sobre o primary
+                    DEFAULT: 'rgb(var(--c-primary) / <alpha-value>)',
+                    fg:  'rgb(var(--c-primary-fg) / <alpha-value>)',
+                    50:  'rgb(var(--c-primary-50) / <alpha-value>)',
+                    100: 'rgb(var(--c-primary-100) / <alpha-value>)',
+                    200: 'rgb(var(--c-primary-200) / <alpha-value>)',
+                    300: 'rgb(var(--c-primary-300) / <alpha-value>)',
+                    400: 'rgb(var(--c-primary-400) / <alpha-value>)',
+                    500: 'rgb(var(--c-primary-500) / <alpha-value>)',
+                    600: 'rgb(var(--c-primary-600) / <alpha-value>)',
+                    700: 'rgb(var(--c-primary-700) / <alpha-value>)',
+                    800: 'rgb(var(--c-primary-800) / <alpha-value>)',
+                    900: 'rgb(var(--c-primary-900) / <alpha-value>)',
                 },
 
-                // ── Semantic surfaces (light) ───────────────────────────────
-                background: "#F8FAFC", // slate-50 — fundo do app
-                surface: "#FFFFFF",    // cards, sidebar, topbar
-                "surface-alt": "#F1F5F9", // slate-100 — zonas alternadas
-                elevated: "#FFFFFF",   // inputs / painéis elevados
-                muted: "#F1F5F9",      // slate-100 — fundos sutis
+                // ── Superfícies (sem opacidade — hex direto via var) ─────────
+                background:   'var(--c-background)',
+                surface:      'var(--c-surface)',
+                'surface-alt': 'var(--c-surface-alt)',
+                elevated:     'var(--c-elevated)',
+                muted:        'var(--c-surface-alt)',
 
-                // ── Content ─────────────────────────────────────────────────
-                foreground: "#0F172A",      // slate-900 — texto principal
-                "muted-foreground": "#475569", // slate-600 — texto secundário (AA)
-                border: "#E2E8F0",          // slate-200
+                // ── Conteúdo — suporta opacidade ─────────────────────────────
+                foreground:          'rgb(var(--c-foreground) / <alpha-value>)',
+                'muted-foreground':  'rgb(var(--c-muted-fg) / <alpha-value>)',
+                border:              'var(--c-border)',
 
-                // ── Status / feedback ───────────────────────────────────────
-                success: { DEFAULT: "#16A34A", soft: "#DCFCE7", fg: "#166534" },
-                warning: { DEFAULT: "#D97706", soft: "#FEF3C7", fg: "#92400E" },
-                danger:  { DEFAULT: "#DC2626", soft: "#FEE2E2", fg: "#991B1B" },
-                info:    { DEFAULT: "#2563EB", soft: "#DBEAFE", fg: "#1E40AF" },
+                // ── Status ───────────────────────────────────────────────────
+                success: {
+                    DEFAULT: 'rgb(var(--c-success) / <alpha-value>)',
+                    soft:    'var(--c-success-soft)',
+                    fg:      'var(--c-success-fg)',
+                },
+                warning: {
+                    DEFAULT: 'rgb(var(--c-warning) / <alpha-value>)',
+                    soft:    'var(--c-warning-soft)',
+                    fg:      'var(--c-warning-fg)',
+                },
+                danger: {
+                    DEFAULT: 'rgb(var(--c-danger) / <alpha-value>)',
+                    soft:    'var(--c-danger-soft)',
+                    fg:      'var(--c-danger-fg)',
+                },
+                info: {
+                    DEFAULT: 'rgb(var(--c-info) / <alpha-value>)',
+                    soft:    'var(--c-info-soft)',
+                    fg:      'var(--c-info-fg)',
+                },
 
-                // ── Aliases legados (tema escuro antigo → valores claros) ────
-                // Mantidos só para não quebrar telas ainda não migradas.
-                "background-dark": "#F8FAFC",
-                app: "#F8FAFC",
-                "sigma-dark": "#FFFFFF",
-                "dark-slate": "#F1F5F9",
-                "slate-panel": "#FFFFFF",
-                "bubble-user": "#EFF6FF",
-                secondary: "#0EA5E9",   // sky-500 — accent secundário
-                "sigma-cyan": "#0EA5E9",
-                "white-alpha-10": "rgba(15, 23, 42, 0.08)",
-                "cyan-glow": "rgba(37, 99, 235, 0.18)",
+                // ── Aliases legados ──────────────────────────────────────────
+                'background-dark': 'var(--c-background)',
+                app:               'var(--c-background)',
+                'sigma-dark':      'var(--c-surface)',
+                'dark-slate':      'var(--c-surface-alt)',
+                'slate-panel':     'var(--c-surface)',
+                'bubble-user':     'rgb(var(--c-primary-50) / 1)',
+                secondary:         'rgb(var(--c-primary-700) / <alpha-value>)',
+                'sigma-cyan':      'rgb(var(--c-primary-700) / <alpha-value>)',
+                'white-alpha-10':  'rgb(var(--c-foreground) / 0.06)',
+                'cyan-glow':       'rgb(var(--c-primary) / 0.15)',
             },
+
             fontFamily: {
-                display: ["Montserrat", "system-ui", "sans-serif"],
-                sans: ["Inter", "system-ui", "sans-serif"],
+                display: ['"Plus Jakarta Sans"', "system-ui", "sans-serif"],
+                sans:    ['"Plus Jakarta Sans"', "system-ui", "sans-serif"],
             },
+
+            letterSpacing: {
+                tighter: "-0.02em",
+                tight:   "-0.01em",
+                normal:  "0em",
+                wide:    "0.007em",
+                wider:   "0.011em",
+                widest:  "0.02em",
+            },
+
             borderRadius: {
                 default: "8px",
-                lg: "10px",
-                xl: "14px",
-                "2xl": "20px",
-                cta: "9999px", // botões "pill"
-                pill: "9999px",
+                sm:      "4px",
+                lg:      "10px",
+                xl:      "12px",
+                "2xl":   "16px",
+                "3xl":   "24px",
+                "4xl":   "32px",
+                cta:     "12px",
+                pill:    "9999px",
             },
+
             spacing: {
                 "section-py": "96px",
             },
+
             maxWidth: {
                 container: "1440px",
             },
+
             boxShadow: {
-                // Elevação suave para tema claro (substitui os "glows" do dark)
-                sm: "0 1px 2px 0 rgba(15, 23, 42, 0.05)",
-                card: "0 1px 3px 0 rgba(15, 23, 42, 0.08), 0 1px 2px -1px rgba(15, 23, 42, 0.06)",
-                premium: "0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -2px rgba(15, 23, 42, 0.05)",
-                lifted: "0 10px 24px -6px rgba(15, 23, 42, 0.12)",
-                "primary-glow": "0 4px 14px -2px rgba(37, 99, 235, 0.35)",
-                "cyan-glow": "0 4px 14px -2px rgba(14, 165, 233, 0.25)",
-                "focus-ring": "0 0 0 3px rgba(37, 99, 235, 0.30)",
+                sm:             "rgba(45,127,249,0.12) 0px 1px 2px",
+                card:           "rgba(45,127,249,0.18) 0px 1px 3px, rgba(45,127,249,0.08) 0px 1px 2px",
+                premium:        "rgba(45,127,249,0.20) 0px 4px 12px, rgba(45,127,249,0.10) 0px 1px 4px",
+                lifted:         "rgba(45,127,249,0.24) 0px 8px 24px, rgba(45,127,249,0.10) 0px 2px 6px",
+                "primary-glow": "rgba(27,97,201,0.32) 0px 4px 14px",
+                "cyan-glow":    "rgba(37,79,173,0.20) 0px 4px 14px",
+                "focus-ring":   "0 0 0 3px rgba(27,97,201,0.28)",
             },
+
             keyframes: {
                 "fade-in": {
                     from: { opacity: "0", transform: "translateY(4px)" },
-                    to: { opacity: "1", transform: "translateY(0)" },
+                    to:   { opacity: "1", transform: "translateY(0)" },
                 },
                 "sigma-spin": { to: { transform: "rotate(360deg)" } },
             },
+
             animation: {
                 "fade-in": "fade-in 0.2s ease-out both",
             },

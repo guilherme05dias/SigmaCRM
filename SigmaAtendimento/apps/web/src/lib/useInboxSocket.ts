@@ -10,15 +10,17 @@ export function useInboxSocket(
     currentConversationId: string | null,
     onConversationUpdated: (updatedConv: any) => void,
     onMessageNew: (newMessage: any) => void,
-    onConversationNew?: (newConv: any) => void
+    onConversationNew?: (newConv: any) => void,
+    /** Chamado em reconexões (NÃO na conexão inicial) para recarregar dados. */
+    onReconnect?: () => void
 ) {
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
 
-    const callbacksRef = useRef({ onConversationUpdated, onMessageNew, onConversationNew });
+    const callbacksRef = useRef({ onConversationUpdated, onMessageNew, onConversationNew, onReconnect });
 
     useEffect(() => {
-        callbacksRef.current = { onConversationUpdated, onMessageNew, onConversationNew };
+        callbacksRef.current = { onConversationUpdated, onMessageNew, onConversationNew, onReconnect };
     });
 
     useEffect(() => {
@@ -28,15 +30,19 @@ export function useInboxSocket(
             auth: { token }
         });
 
+        // isFirstConnect é local a esta instância de socket — a primeira conexão
+        // é a inicial; todas as seguintes são reconexões (socket.io reconecta auto).
+        let isFirstConnect = true;
+
         newSocket.on('connect', () => {
-            console.log('Socket connected');
             setIsConnected(true);
+            if (!isFirstConnect) {
+                callbacksRef.current.onReconnect?.();
+            }
+            isFirstConnect = false;
         });
 
-        newSocket.on('disconnect', () => {
-            console.log('Socket disconnected');
-            setIsConnected(false);
-        });
+        newSocket.on('disconnect', () => setIsConnected(false));
 
         newSocket.on('conversation:updated', (conv) => {
             callbacksRef.current.onConversationUpdated(conv);
