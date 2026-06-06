@@ -9,6 +9,22 @@ para "usável em produção", com **como cada coisa deve funcionar**, a abordage
 os arquivos afetados e o critério de pronto. Organizado em **3 ondas** (GSD), da mais
 bloqueante para o polimento.
 
+## Atualização de execução — 2026-06-06
+
+- Plano duplicado removido: `docs/ACTION_PLAN.md` passa a ser a fonte canônica.
+- **C2 preparado em código:** webhook idempotente via `WhatsAppInboundEvent`, envio por
+  `WhatsAppOutbox`, retry manual em `POST /api/whatsapp/outbox/retry` e boas-vindas via
+  outbox. Falta o teste humano com celular real.
+- **C3 preparado em SQL:** migration `20260606000200_enable_tenant_rls` adiciona RLS nas
+  tabelas de negócio usando `app.current_company_id`. O backend Prisma continua usando
+  `companyScope`; validação final deve acontecer no Supabase com role sujeita a RLS.
+- **C5 iniciado:** rota LGPD `DELETE /api/contacts/:id/data` remove contato, conversas,
+  mensagens, tickets e eventos/outbox associados.
+- **C6 preparado:** API ganhou `Dockerfile`, web ganhou `_redirects` para SPA e CORS ficou
+  restrito por `CORS_ORIGIN`.
+- **C7 iniciado:** paginação real de mensagens no backend e no Inbox.
+- Validação local: `npm run build` no monorepo passou para API e web.
+
 > **Legenda de esforço:** 🟢 pequeno (<1h) · 🟡 médio (1–3h) · 🔴 grande (>3h)
 > **Legenda de prioridade:** 🔴 crítico (bloqueia uso) · 🟡 importante · 🟢 polimento
 
@@ -332,6 +348,9 @@ celular.
 conversa/mensagem → socket emite → UI atualiza. Persistir `WhatsAppInboundEvent`
 (idempotência) e usar `WhatsAppOutbox` (retry de envio).
 
+**Status 2026-06-06.** Código preparado: idempotência, outbox, retry manual e boas-vindas
+passaram a existir. Falta escanear com celular real e validar entrada/saída ponta-a-ponta.
+
 **Decisão pendente.** ⚠️ Precisa de **celular disponível** e um número de teste.
 
 **Critério de pronto.** Conversa real ponta-a-ponta funcionando.
@@ -348,6 +367,10 @@ empresas (defesa em profundidade).
 
 **Abordagem técnica.** Policies RLS por `company_id` nas tabelas de negócio; setar
 `app.current_company_id` por request. Ver ADRs.
+
+**Status 2026-06-06.** Migration SQL criada para habilitar RLS nas tabelas de negócio.
+Como o backend usa Prisma direto, o isolamento de aplicação segue vindo de `companyScope`;
+o teste final de RLS precisa ser feito no Supabase com uma role sujeita às policies.
 
 **Arquivos.** Nova migration de RLS, `lib/prisma.ts`/`tenant.ts`.
 
@@ -388,6 +411,9 @@ configurável.
 
 **Critério de pronto.** Rota de exclusão de dados de um contato; documentado.
 
+**Status 2026-06-06.** Rota `DELETE /api/contacts/:id/data` criada para ADMIN/SUPERVISOR.
+Ainda falta tela administrativa/fluxo operacional e política de retenção automática.
+
 ---
 
 ## C6 · Deploy (Railway/Render + Supabase) 🔴 / 🔴
@@ -398,13 +424,16 @@ variáveis de ambiente seguras; build de produção do front servido.
 **Abordagem técnica.** Dockerfile/serviço para `apps/api`; build estático de `apps/web`;
 `DATABASE_URL`/`DIRECT_URL`/secrets no provedor; CORS restrito ao domínio do front.
 
+**Status 2026-06-06.** `apps/api/Dockerfile`, `_redirects` do Vite e `CORS_ORIGIN` criados.
+Falta provisionar Supabase/provedor e configurar variáveis reais.
+
 **Critério de pronto.** URL pública funcionando, multiusuário.
 
 ---
 
 ## C7 · Polimento de UX 🟢 / 🟡
 
-- Paginação real de mensagens quando a conversa cresce (estrutura `hasMore` já pronta).
+- ✅ Paginação real de mensagens quando a conversa cresce.
 - Estados de loading/skeleton nas listas.
 - Toasts de sucesso/erro padronizados (hoje cada tela trata inline).
 - Acessibilidade: foco em modais, `aria-*` em ícones-botão, navegação por teclado.

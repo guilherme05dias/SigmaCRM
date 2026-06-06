@@ -4,6 +4,9 @@ import { getWhatsAppProvider } from '../whatsapp';
 import { getIO, emitToCompany } from '../socket';
 import { getCurrentSettings } from '../services/businessHoursService';
 import { metaCloudConfig } from '../whatsapp/config/metaCloud.config';
+import { authMiddleware } from '../middlewares/auth.middleware';
+import { getCompanyId } from '../lib/tenant';
+import { currentWhatsAppProvider, retryFailedOutbox, sendTextWithOutbox } from '../services/whatsappOutbox.service';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -319,6 +322,17 @@ router.get('/sessions/:sessionId/qrcode-page', async (req: Request, res: Express
     }
 });
 
+router.post('/outbox/retry', authMiddleware, async (req: Request, res: ExpressResponse) => {
+    try {
+        const companyId = getCompanyId(req);
+        const limit = Math.max(1, Math.min(Number(req.body?.limit || 25), 100));
+        const result = await retryFailedOutbox({ companyId, limit });
+        res.json({ ok: true, ...result });
+    } catch (error: any) {
+        res.status(error?.status ?? 500).json({ error: error?.message ?? 'Erro ao reprocessar outbox do WhatsApp' });
+    }
+});
+
 // WhatsApp Webhook Verification (GET)
 router.get(['/webhook', '/webhooks/meta'], (req: Request, res: ExpressResponse) => {
     const mode = req.query['hub.mode'];
@@ -398,6 +412,24 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
         // Process Messages
         for (const msg of parsed.messages) {
             if (msg.direction === 'INBOUND') {
+                let inboundEvent;
+                try {
+                    inboundEvent = await prisma.whatsAppInboundEvent.create({
+                        data: {
+                            companyId,
+                            provider: currentWhatsAppProvider(),
+                            providerMessageId: msg.waMessageId || `in_${phone}_${Date.now()}`,
+                            fromPhone: phone,
+                            rawPayload: payload,
+                        },
+                    });
+                } catch (error: any) {
+                    if (error?.code === 'P2002') {
+                        continue;
+                    }
+                    throw error;
+                }
+
                 const message = await prisma.message.create({
                     data: {
                         companyId,
@@ -411,6 +443,10 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
                 });
 
                 getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
+                await prisma.whatsAppInboundEvent.update({
+                    where: { id: inboundEvent.id },
+                    data: { processedAt: new Date() },
+                });
             }
         }
 
@@ -455,10 +491,12 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
                     // Emit to frontend (so the agent sees the system message)
                     getIO().to(`conversation:${conversation.id}`).emit('message:new', systemMsg);
 
-                    // Send via WhatsApp
-                    await whatsappProvider.sendText({
-                        to: phone,
-                        body: autoMessageText
+                    await sendTextWithOutbox({
+                        companyId,
+                        conversationId: conversation.id,
+                        messageId: systemMsg.id,
+                        toPhone: phone,
+                        body: autoMessageText,
                     });
                 }
             } catch (err) {

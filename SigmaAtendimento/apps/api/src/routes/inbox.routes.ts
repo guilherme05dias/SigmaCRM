@@ -1,14 +1,14 @@
 import { Router } from 'express';
-import { PrismaClient, ConversationStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
+import { ConversationStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
 import { getIO, emitToCompany } from '../socket';
-import { getWhatsAppProvider } from '../whatsapp';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { getCompanyId } from '../lib/tenant';
 import { generateProtocol } from '../services/protocol.service';
+import { prisma } from '../lib/prisma';
+import { sendTextWithOutbox } from '../services/whatsappOutbox.service';
 import { z } from 'zod';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 const GetMessagesSchema = z.object({
     take: z.string().optional().transform(v => v ? parseInt(v, 10) : 50),
@@ -188,7 +188,11 @@ router.post('/conversations/:id/close', async (req, res) => {
     try {
         const conversationId = req.params.id;
         
-        const currentConversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
+        const companyId = getCompanyId(req);
+        const currentConversation = await prisma.conversation.findFirst({
+            where: { id: conversationId, companyId },
+            include: { contact: true },
+        });
         if (!currentConversation) {
             return res.status(404).json({ error: 'Conversation not found' });
         }
@@ -212,10 +216,11 @@ router.post('/conversations/:id/close', async (req, res) => {
         emitToCompany(conversation.companyId, 'conversation:updated', conversation);
 
         // Fetch settings for closing message
-        const settings = await prisma.settings.findFirst();
+        const settings = await prisma.settings.findUnique({ where: { companyId } });
         if (settings && settings.closingMessage) {
             const systemMsg = await prisma.message.create({
                 data: {
+                    companyId,
                     conversationId,
                     direction: MessageDirection.SYSTEM,
                     type: MessageType.TEXT,
@@ -224,12 +229,13 @@ router.post('/conversations/:id/close', async (req, res) => {
             });
             getIO().to(`conversation:${conversationId}`).emit('message:new', systemMsg);
 
-            // Gravação local (via API mock ou waha real)
             try {
-                const provider = getWhatsAppProvider();
-                await provider.sendText({
-                    to: conversation.contact.phone,
-                    body: settings.closingMessage
+                await sendTextWithOutbox({
+                    companyId,
+                    conversationId,
+                    messageId: systemMsg.id,
+                    toPhone: conversation.contact.phone,
+                    body: settings.closingMessage,
                 });
             } catch (err) {
                 console.error('Error sending closing message via provider:', err);
@@ -251,9 +257,10 @@ router.post('/conversations/:id/messages', async (req, res) => {
         
         const { body, type, mediaUrl } = parsed.data;
         const authUserId = req.user?.id || null;
+        const companyId = getCompanyId(req);
 
-        const conversation = await prisma.conversation.findUnique({
-            where: { id: conversationId },
+        const conversation = await prisma.conversation.findFirst({
+            where: { id: conversationId, companyId },
             include: { contact: true }
         });
 
@@ -262,24 +269,21 @@ router.post('/conversations/:id/messages', async (req, res) => {
         }
 
         const messageType = type || MessageType.TEXT;
-        const provider = getWhatsAppProvider();
         let waMessageId: string | undefined;
+        let outboxId: string | undefined;
 
         try {
             if (messageType === MessageType.TEXT || !mediaUrl) {
-                const response = await provider.sendText({
-                    to: conversation.contact.phone,
-                    body: body || ''
+                const response = await sendTextWithOutbox({
+                    companyId,
+                    conversationId,
+                    toPhone: conversation.contact.phone,
+                    body: body || '',
                 });
                 waMessageId = response.waMessageId;
+                outboxId = response.outboxId;
             } else {
-                const response = await provider.sendMedia({
-                    to: conversation.contact.phone,
-                    type: messageType,
-                    mediaUrl: mediaUrl,
-                    caption: body
-                });
-                waMessageId = response.waMessageId;
+                return res.status(501).json({ error: 'Envio de mídia ainda não usa outbox nesta rota.' });
             }
         } catch (err) {
             console.error('Provider failed to send message:', err);
@@ -288,6 +292,7 @@ router.post('/conversations/:id/messages', async (req, res) => {
 
         const message = await prisma.message.create({
             data: {
+                companyId,
                 conversationId,
                 direction: MessageDirection.OUTBOUND,
                 type: messageType,
@@ -307,6 +312,12 @@ router.post('/conversations/:id/messages', async (req, res) => {
                 }
             }
         });
+        if (outboxId) {
+            await prisma.whatsAppOutbox.update({
+                where: { id: outboxId },
+                data: { messageId: message.id },
+            });
+        }
 
         await prisma.conversation.update({
             where: { id: conversationId },
@@ -341,7 +352,7 @@ router.post('/conversations/:id/tickets', async (req, res) => {
             where: { id: conversationId }
         });
 
-        if (!conversation) {
+        if (!conversation || conversation.companyId !== companyId) {
             return res.status(404).json({ error: 'Conversation not found' });
         }
 

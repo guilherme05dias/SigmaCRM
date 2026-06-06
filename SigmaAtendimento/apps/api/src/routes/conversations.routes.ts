@@ -5,6 +5,7 @@ import { getWhatsAppProvider } from '../whatsapp';
 import { getIO, emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { companyScope, getCompanyId } from '../lib/tenant';
+import { sendTextWithOutbox } from '../services/whatsappOutbox.service';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -138,6 +139,8 @@ router.post('/start', async (req: Request, res: Response) => {
 router.get('/:id/messages', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
+        const take = Math.max(1, Math.min(Number(req.query.take || 50), 100));
+        const cursor = typeof req.query.cursor === 'string' ? req.query.cursor : undefined;
         const conversation = await prisma.conversation.findFirst({
             where: { id, ...companyScope(req) },
             select: { id: true },
@@ -149,9 +152,21 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
 
         const messages = await prisma.message.findMany({
             where: { conversationId: id, ...companyScope(req) },
-            orderBy: { createdAt: 'asc' },
+            orderBy: { createdAt: 'desc' },
+            take: take + 1,
+            ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
         });
-        res.json({ data: messages, meta: { hasMore: false } });
+        const hasMore = messages.length > take;
+        if (hasMore) messages.pop();
+
+        const chronological = messages.reverse();
+        res.json({
+            data: chronological,
+            meta: {
+                hasMore,
+                nextCursor: hasMore ? chronological[0]?.id ?? null : null,
+            },
+        });
     } catch (error) {
         res.status(500).json({ error: 'Erro ao buscar mensagens' });
     }
@@ -283,9 +298,10 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
         const signature = senderSignatures[0]?.messageSignature?.trim();
         const messageBody = signature ? `${signature}\n${body}` : body;
 
-        // Send via provider
-        const result = await whatsappProvider.sendText({
-            to: conversation.contact.phone,
+        const sendResult = await sendTextWithOutbox({
+            companyId,
+            conversationId: id,
+            toPhone: conversation.contact.phone,
             body: messageBody,
         });
 
@@ -297,9 +313,13 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
                 direction: MessageDirection.OUTBOUND,
                 type: MessageType.TEXT,
                 body: messageBody,
-                waMessageId: result.waMessageId,
+                waMessageId: sendResult.waMessageId,
                 userId,
             },
+        });
+        await prisma.whatsAppOutbox.update({
+            where: { id: sendResult.outboxId },
+            data: { messageId: message.id },
         });
 
         // Update conversation

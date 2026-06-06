@@ -31,6 +31,7 @@ export default function Inbox() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [departments, setDepartments] = useState<DepartmentOption[]>([]);
     const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
+    const [messageCursor, setMessageCursor] = useState<string | null>(null);
     const [isLoadingMessages, setIsLoadingMessages] = useState<boolean>(false);
     const [activeTab, setActiveTab] = useState<'chats' | 'fila' | 'historico' | 'contatos'>('chats');
     const [unauthorized, setUnauthorized] = useState(false);
@@ -71,27 +72,37 @@ export default function Inbox() {
             .catch(handleApiError);
     }, []);
 
-    const loadMessages = (id: string) => {
+    const loadMessages = (id: string, options: { cursor?: string | null; prepend?: boolean } = {}) => {
         setIsLoadingMessages(true);
-        apiRequest<{ data: Message[]; meta?: { hasMore?: boolean } }>(`/api/conversations/${id}/messages`)
+        const params = new URLSearchParams({ take: '50' });
+        if (options.cursor) params.set('cursor', options.cursor);
+
+        apiRequest<{ data: Message[]; meta?: { hasMore?: boolean; nextCursor?: string | null } }>(`/api/conversations/${id}/messages?${params.toString()}`)
             .then(data => {
                 if (!data) return;
                 const fetched = Array.isArray(data.data) ? data.data : [];
-                setMessages(fetched);
+                setMessages((prev) => {
+                    if (!options.prepend) return fetched;
+                    const existingIds = new Set(prev.map((message) => message.id));
+                    const older = fetched.filter((message) => !existingIds.has(message.id));
+                    return [...older, ...prev];
+                });
                 setHasMoreMessages(Boolean(data.meta?.hasMore));
+                setMessageCursor(data.meta?.nextCursor ?? null);
             })
             .catch(handleApiError)
             .finally(() => setIsLoadingMessages(false));
     };
 
-    // Paginação de mensagens mais antigas (backend retorna hasMore:false hoje,
-    // mas a estrutura está pronta para quando for ativada)
     const loadMoreMessages = () => {
-        if (!selectedConvId || !hasMoreMessages || isLoadingMessages) return;
-        loadMessages(selectedConvId);
+        if (!selectedConvId || !hasMoreMessages || isLoadingMessages || !messageCursor) return;
+        loadMessages(selectedConvId, { cursor: messageCursor, prepend: true });
     };
 
     useEffect(() => {
+        setMessages([]);
+        setHasMoreMessages(false);
+        setMessageCursor(null);
         if (selectedConvId) loadMessages(selectedConvId);
     }, [selectedConvId]);
 
