@@ -19,6 +19,37 @@ interface WhatsAppHistorySyncSummary {
     importedMessages: number;
 }
 
+interface WhatsAppOutboxSummary {
+    pending: number;
+    failed: number;
+    sent: number;
+    total: number;
+}
+
+interface WhatsAppOutboxItem {
+    id: string;
+    provider: string;
+    toPhone: string;
+    bodyPreview: string | null;
+    status: 'PENDING' | 'FAILED' | 'SENT';
+    attempts: number;
+    lastError: string | null;
+    createdAt: string;
+    updatedAt: string;
+}
+
+interface WhatsAppOutboxResponse {
+    summary: WhatsAppOutboxSummary;
+    items: WhatsAppOutboxItem[];
+}
+
+interface WhatsAppOutboxRetryResponse {
+    ok: boolean;
+    scanned: number;
+    sent: number;
+    failed: number;
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3334';
 const WHATSAPP_SESSION_ID = 'default';
 type SettingsSection = 'business-hours' | 'auto-messages' | 'whatsapp';
@@ -84,6 +115,25 @@ function formatWhatsAppStatus(status: string) {
     return labels[status] || status;
 }
 
+function formatOutboxStatus(status: WhatsAppOutboxItem['status']) {
+    const labels: Record<WhatsAppOutboxItem['status'], string> = {
+        PENDING: 'Pendente',
+        FAILED: 'Falha',
+        SENT: 'Enviado',
+    };
+
+    return labels[status];
+}
+
+function formatDateTime(value: string) {
+    return new Intl.DateTimeFormat('pt-BR', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+    }).format(new Date(value));
+}
+
 export default function Settings() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
@@ -94,6 +144,11 @@ export default function Settings() {
     const [whatsAppSyncing, setWhatsAppSyncing] = useState(false);
     const [whatsAppSyncSummary, setWhatsAppSyncSummary] = useState<WhatsAppHistorySyncSummary | null>(null);
     const [whatsAppError, setWhatsAppError] = useState<string | null>(null);
+    const [whatsAppOutbox, setWhatsAppOutbox] = useState<WhatsAppOutboxResponse | null>(null);
+    const [whatsAppOutboxLoading, setWhatsAppOutboxLoading] = useState(false);
+    const [whatsAppOutboxRetrying, setWhatsAppOutboxRetrying] = useState(false);
+    const [whatsAppOutboxError, setWhatsAppOutboxError] = useState<string | null>(null);
+    const [whatsAppOutboxSuccess, setWhatsAppOutboxSuccess] = useState<string | null>(null);
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
     const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
     const [settingsLoading, setSettingsLoading] = useState(true);
@@ -178,9 +233,26 @@ export default function Settings() {
         }
     };
 
+    const loadWhatsAppOutbox = async () => {
+        setWhatsAppOutboxLoading(true);
+        setWhatsAppOutboxError(null);
+
+        try {
+            const data = await apiRequest<WhatsAppOutboxResponse>('/api/whatsapp/outbox?limit=25');
+            setWhatsAppOutbox(data);
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setWhatsAppOutboxError(err instanceof Error ? err.message : 'Erro ao carregar fila de envio WhatsApp.');
+            }
+        } finally {
+            setWhatsAppOutboxLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadSettings();
         loadWhatsAppSessions();
+        loadWhatsAppOutbox();
     }, []);
 
     useEffect(() => {
@@ -262,6 +334,27 @@ export default function Settings() {
             }
         } finally {
             setWhatsAppSyncing(false);
+        }
+    };
+
+    const retryWhatsAppOutbox = async () => {
+        setWhatsAppOutboxRetrying(true);
+        setWhatsAppOutboxError(null);
+        setWhatsAppOutboxSuccess(null);
+
+        try {
+            const result = await apiRequest<WhatsAppOutboxRetryResponse>('/api/whatsapp/outbox/retry', {
+                method: 'POST',
+                body: JSON.stringify({ limit: 25 }),
+            });
+            setWhatsAppOutboxSuccess(`Retry concluído: ${result.scanned} avaliadas, ${result.sent} enviadas e ${result.failed} ainda com falha.`);
+            await loadWhatsAppOutbox();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setWhatsAppOutboxError(err instanceof Error ? err.message : 'Erro ao reprocessar fila de envio WhatsApp.');
+            }
+        } finally {
+            setWhatsAppOutboxRetrying(false);
         }
     };
 
@@ -539,6 +632,111 @@ export default function Settings() {
                                 <div className="bg-surface-alt p-4 rounded-xl border border-border text-center">
                                     <p className="text-xs text-muted-foreground uppercase font-bold tracking-widest mb-1">Webhook</p>
                                     <p className="text-base font-bold text-primary">Ativo</p>
+                                </div>
+                            </div>
+
+                            <div className="mt-8 rounded-xl border border-border bg-surface-alt p-5">
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                    <div>
+                                        <p className="text-sm font-bold text-foreground">Fila de envio WhatsApp</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">Monitore mensagens pendentes ou com falha e reenvie quando o provider voltar.</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={loadWhatsAppOutbox}
+                                            disabled={whatsAppOutboxLoading || whatsAppOutboxRetrying}
+                                            className="rounded-pill border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {whatsAppOutboxLoading ? 'Atualizando...' : 'Atualizar'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={retryWhatsAppOutbox}
+                                            disabled={whatsAppOutboxRetrying || whatsAppOutboxLoading || !whatsAppOutbox?.summary.failed}
+                                            className="rounded-pill bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            {whatsAppOutboxRetrying ? 'Reenviando...' : 'Reenviar falhas'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {whatsAppOutboxError && (
+                                    <div className="mt-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">
+                                        {whatsAppOutboxError}
+                                    </div>
+                                )}
+                                {whatsAppOutboxSuccess && (
+                                    <div className="mt-4 rounded-lg border border-success/20 bg-success-soft p-3 text-sm text-success-fg">
+                                        {whatsAppOutboxSuccess}
+                                    </div>
+                                )}
+
+                                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                    <div className="rounded-lg border border-border bg-surface p-3">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pendentes</p>
+                                        <p className="mt-1 text-2xl font-bold text-warning">{whatsAppOutbox?.summary.pending ?? 0}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-border bg-surface p-3">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Falhas</p>
+                                        <p className="mt-1 text-2xl font-bold text-danger">{whatsAppOutbox?.summary.failed ?? 0}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-border bg-surface p-3">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Enviadas</p>
+                                        <p className="mt-1 text-2xl font-bold text-success">{whatsAppOutbox?.summary.sent ?? 0}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-border bg-surface p-3">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Total</p>
+                                        <p className="mt-1 text-2xl font-bold text-primary">{whatsAppOutbox?.summary.total ?? 0}</p>
+                                    </div>
+                                </div>
+
+                                <div className="mt-5 overflow-x-auto">
+                                    <table className="w-full min-w-[680px] text-left text-sm">
+                                        <thead>
+                                            <tr className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                                                <th className="px-3 py-2">Status</th>
+                                                <th className="px-3 py-2">Destino</th>
+                                                <th className="px-3 py-2">Mensagem</th>
+                                                <th className="px-3 py-2 text-center">Tentativas</th>
+                                                <th className="px-3 py-2">Atualizado</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-border">
+                                            {whatsAppOutbox?.items.map((item) => (
+                                                <tr key={item.id}>
+                                                    <td className="px-3 py-3">
+                                                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.status === 'FAILED' ? 'bg-danger-soft text-danger-fg' : 'bg-warning/10 text-warning'}`}>
+                                                            {formatOutboxStatus(item.status)}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-3 py-3 font-mono text-xs text-foreground">{item.toPhone}</td>
+                                                    <td className="max-w-[260px] px-3 py-3 text-muted-foreground">
+                                                        <div className="truncate">{item.bodyPreview || item.lastError || 'Sem prévia disponível'}</div>
+                                                        {item.lastError && (
+                                                            <div className="mt-1 truncate text-xs text-danger">{item.lastError}</div>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-3 py-3 text-center text-muted-foreground">{item.attempts}</td>
+                                                    <td className="px-3 py-3 text-xs text-muted-foreground">{formatDateTime(item.updatedAt)}</td>
+                                                </tr>
+                                            ))}
+                                            {!whatsAppOutboxLoading && whatsAppOutbox?.items.length === 0 && (
+                                                <tr>
+                                                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                                                        Nenhuma mensagem pendente ou com falha.
+                                                    </td>
+                                                </tr>
+                                            )}
+                                            {whatsAppOutboxLoading && (
+                                                <tr>
+                                                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
+                                                        Carregando fila de envio...
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
                                 </div>
                             </div>
                             </div>

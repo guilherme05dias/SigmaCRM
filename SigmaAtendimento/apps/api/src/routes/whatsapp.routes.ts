@@ -1,4 +1,5 @@
 import { Router, Request, Response as ExpressResponse } from 'express';
+import { OutboxStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { getWhatsAppProvider } from '../whatsapp';
 import { getIO, emitToCompany } from '../socket';
@@ -319,6 +320,83 @@ router.get('/sessions/:sessionId/qrcode-page', async (req: Request, res: Express
 </html>`);
     } catch (error: any) {
         res.status(500).send(error?.message ?? 'Failed to render WhatsApp QR Code');
+    }
+});
+
+router.get('/outbox', authMiddleware, async (req: Request, res: ExpressResponse) => {
+    try {
+        const companyId = getCompanyId(req);
+        const limit = Math.max(1, Math.min(Number(req.query.limit || 25), 100));
+        const allowedStatuses = new Set(Object.values(OutboxStatus));
+        const requestedStatuses = String(req.query.status || '')
+            .split(',')
+            .map((status) => status.trim().toUpperCase())
+            .filter((status): status is OutboxStatus => allowedStatuses.has(status as OutboxStatus));
+        const statusFilter = requestedStatuses.length
+            ? requestedStatuses
+            : [OutboxStatus.FAILED, OutboxStatus.PENDING];
+
+        const [summaryRows, rows] = await Promise.all([
+            prisma.whatsAppOutbox.groupBy({
+                by: ['status'],
+                where: { companyId },
+                _count: { _all: true },
+            }),
+            prisma.whatsAppOutbox.findMany({
+                where: {
+                    companyId,
+                    status: { in: statusFilter },
+                },
+                orderBy: { updatedAt: 'desc' },
+                take: limit,
+                select: {
+                    id: true,
+                    provider: true,
+                    toPhone: true,
+                    payload: true,
+                    status: true,
+                    attempts: true,
+                    lastError: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            }),
+        ]);
+
+        const summary = {
+            pending: 0,
+            failed: 0,
+            sent: 0,
+            total: 0,
+        };
+
+        for (const row of summaryRows) {
+            const count = row._count._all;
+            summary.total += count;
+            if (row.status === OutboxStatus.PENDING) summary.pending = count;
+            if (row.status === OutboxStatus.FAILED) summary.failed = count;
+            if (row.status === OutboxStatus.SENT) summary.sent = count;
+        }
+
+        res.json({
+            summary,
+            items: rows.map((row) => {
+                const payload = row.payload as { body?: string } | null;
+                return {
+                    id: row.id,
+                    provider: row.provider,
+                    toPhone: row.toPhone,
+                    bodyPreview: payload?.body || null,
+                    status: row.status,
+                    attempts: row.attempts,
+                    lastError: row.lastError,
+                    createdAt: row.createdAt,
+                    updatedAt: row.updatedAt,
+                };
+            }),
+        });
+    } catch (error: any) {
+        res.status(error?.status ?? 500).json({ error: error?.message ?? 'Erro ao listar outbox do WhatsApp' });
     }
 });
 

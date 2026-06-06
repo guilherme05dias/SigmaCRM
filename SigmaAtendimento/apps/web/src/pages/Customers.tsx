@@ -23,6 +23,34 @@ interface Customer {
     };
 }
 
+interface CustomerContact {
+    id: string;
+    customerId?: string | null;
+    name?: string | null;
+    phone: string;
+    email?: string | null;
+    role?: string | null;
+    updatedAt: string;
+    customer?: Pick<Customer, 'id' | 'name'> | null;
+}
+
+interface ContactDataDeletionSummary {
+    contacts: number;
+    conversations: number;
+    messages: number;
+    tickets: number;
+    ticketTimeline: number;
+    ticketEvaluation: number;
+    ticketFieldService: number;
+    inboundEvents: number;
+    outbox: number;
+}
+
+interface ContactDataDeletionResponse {
+    ok: boolean;
+    deleted: ContactDataDeletionSummary;
+}
+
 interface CustomerFormState {
     name: string;
     document: string;
@@ -52,13 +80,20 @@ export default function Customers() {
     const { user, logout } = useAuth();
     const [searchParams] = useSearchParams();
     const [customers, setCustomers] = useState<Customer[]>([]);
+    const [contacts, setContacts] = useState<CustomerContact[]>([]);
     const [query, setQuery] = useState(searchParams.get('query') || '');
     const [status, setStatus] = useState('');
     const [form, setForm] = useState<CustomerFormState>(initialForm);
     const [editingId, setEditingId] = useState<string | null>(null);
+    const [lgpdTarget, setLgpdTarget] = useState<CustomerContact | null>(null);
+    const [lgpdConfirmation, setLgpdConfirmation] = useState('');
+    const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState<string | null>(null);
+
+    const canDeleteContactData = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
 
     const loadCustomers = () => {
         setLoading(true);
@@ -68,8 +103,14 @@ export default function Customers() {
         if (query.trim()) params.set('query', query.trim());
         if (status) params.set('status', status);
 
-        apiRequest<Customer[]>(`/api/customers${params.toString() ? `?${params}` : ''}`)
-            .then(setCustomers)
+        Promise.all([
+            apiRequest<Customer[]>(`/api/customers${params.toString() ? `?${params}` : ''}`),
+            apiRequest<CustomerContact[]>('/api/contacts'),
+        ])
+            .then(([customerData, contactData]) => {
+                setCustomers(customerData);
+                setContacts(contactData);
+            })
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
                     setError(err instanceof Error ? err.message : 'Erro ao carregar clientes.');
@@ -96,10 +137,21 @@ export default function Customers() {
         };
     }, [customers]);
 
+    const contactsByCustomer = useMemo(() => {
+        const grouped = new Map<string, CustomerContact[]>();
+        for (const contact of contacts) {
+            if (!contact.customerId) continue;
+            const current = grouped.get(contact.customerId) || [];
+            grouped.set(contact.customerId, [...current, contact]);
+        }
+        return grouped;
+    }, [contacts]);
+
     const handleSubmit = async (event: FormEvent) => {
         event.preventDefault();
         setSaving(true);
         setError(null);
+        setSuccess(null);
 
         const payload = {
             name: form.name,
@@ -124,6 +176,7 @@ export default function Customers() {
             }
             setForm(initialForm);
             setEditingId(null);
+            setSuccess(editingId ? 'Cliente atualizado com sucesso.' : 'Cliente criado com sucesso.');
             loadCustomers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
@@ -147,13 +200,57 @@ export default function Customers() {
     };
 
     const deactivateCustomer = async (customer: Customer) => {
+        setError(null);
+        setSuccess(null);
         try {
             await apiRequest<void>(`/api/customers/${customer.id}`, { method: 'DELETE' });
+            setSuccess(`Cliente ${customer.name} inativado com sucesso.`);
             loadCustomers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
                 setError(err instanceof Error ? err.message : 'Erro ao inativar cliente.');
             }
+        }
+    };
+
+    const openLgpdDeletion = (contact: CustomerContact) => {
+        setLgpdTarget(contact);
+        setLgpdConfirmation('');
+        setError(null);
+        setSuccess(null);
+    };
+
+    const closeLgpdDeletion = () => {
+        if (deletingContactId) return;
+        setLgpdTarget(null);
+        setLgpdConfirmation('');
+    };
+
+    const deleteContactData = async () => {
+        if (!lgpdTarget || lgpdConfirmation !== 'EXCLUIR DADOS') return;
+
+        setDeletingContactId(lgpdTarget.id);
+        setError(null);
+        setSuccess(null);
+
+        try {
+            const result = await apiRequest<ContactDataDeletionResponse>(`/api/contacts/${lgpdTarget.id}/data`, {
+                method: 'DELETE',
+            });
+
+            const deleted = result.deleted;
+            setSuccess(
+                `Dados do contato apagados: ${deleted.contacts} contato, ${deleted.conversations} conversas, ${deleted.messages} mensagens e ${deleted.tickets} tickets removidos.`
+            );
+            setLgpdTarget(null);
+            setLgpdConfirmation('');
+            loadCustomers();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setError(err instanceof Error ? err.message : 'Erro ao apagar dados do contato.');
+            }
+        } finally {
+            setDeletingContactId(null);
         }
     };
 
@@ -212,6 +309,12 @@ export default function Customers() {
                             </select>
                         </div>
 
+                        {(error || success) && (
+                            <div className={`mb-4 rounded-lg border p-3 text-sm ${error ? 'border-danger/20 bg-danger-soft text-danger-fg' : 'border-success/20 bg-success-soft text-success-fg'}`}>
+                                {error || success}
+                            </div>
+                        )}
+
                         <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-card">
                             <div className="overflow-x-auto">
                                 <table className="w-full min-w-[820px] text-left">
@@ -248,7 +351,37 @@ export default function Customers() {
                                                     </span>
                                                 </td>
                                                 <td className="px-5 py-4 text-sm text-muted-foreground">
-                                                    {(customer._count?.contacts || 0)} contatos · {(customer._count?.tickets || 0)} tickets
+                                                    <div>
+                                                        <p>{(customer._count?.contacts || 0)} contatos · {(customer._count?.tickets || 0)} tickets</p>
+                                                        {(contactsByCustomer.get(customer.id) || []).length > 0 && (
+                                                            <div className="mt-2 flex flex-col gap-2">
+                                                                {(contactsByCustomer.get(customer.id) || []).slice(0, 3).map((contact) => (
+                                                                    <div key={contact.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-alt px-2.5 py-2">
+                                                                        <div className="min-w-0">
+                                                                            <p className="truncate text-xs font-semibold text-foreground">{contact.name || 'Contato sem nome'}</p>
+                                                                            <p className="truncate text-[11px] text-muted-foreground">{contact.phone}</p>
+                                                                        </div>
+                                                                        {canDeleteContactData && (
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => openLgpdDeletion(contact)}
+                                                                                className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"
+                                                                                title="Apagar dados LGPD"
+                                                                                aria-label={`Apagar dados LGPD do contato ${contact.name || contact.phone}`}
+                                                                            >
+                                                                                <Icon name="delete" className="size-3.5" />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                ))}
+                                                                {(customer._count?.contacts || 0) > (contactsByCustomer.get(customer.id) || []).length && (
+                                                                    <p className="text-[11px] text-muted-foreground">
+                                                                        +{(customer._count?.contacts || 0) - (contactsByCustomer.get(customer.id) || []).length} contatos nao exibidos
+                                                                    </p>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <div className="flex justify-end gap-2">
@@ -323,6 +456,57 @@ export default function Customers() {
                     </aside>
                 </div>
             </main>
+
+            {lgpdTarget && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="lgpd-delete-title">
+                    <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-card">
+                        <div className="flex items-start gap-3">
+                            <div className="rounded-xl bg-danger-soft p-2 text-danger">
+                                <Icon name="delete" className="size-5" />
+                            </div>
+                            <div>
+                                <h2 id="lgpd-delete-title" className="text-lg font-bold text-foreground">Apagar dados do contato</h2>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Esta acao remove o contato, conversas, mensagens, tickets, avaliacoes, eventos de WhatsApp e mensagens pendentes vinculadas.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-5 rounded-lg border border-border bg-surface-alt p-3 text-sm">
+                            <p className="font-semibold text-foreground">{lgpdTarget.name || 'Contato sem nome'}</p>
+                            <p className="text-muted-foreground">{lgpdTarget.phone}</p>
+                            {lgpdTarget.email && <p className="text-muted-foreground">{lgpdTarget.email}</p>}
+                        </div>
+
+                        <label className="mt-5 block">
+                            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                Digite EXCLUIR DADOS para confirmar
+                            </span>
+                            <input
+                                value={lgpdConfirmation}
+                                onChange={(event) => setLgpdConfirmation(event.target.value)}
+                                className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-danger focus:ring-2 focus:ring-danger/30"
+                                autoFocus
+                            />
+                        </label>
+
+                        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                            <Button type="button" variant="outline" onClick={closeLgpdDeletion} disabled={Boolean(deletingContactId)}>
+                                Cancelar
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="danger"
+                                loading={deletingContactId === lgpdTarget.id}
+                                disabled={lgpdConfirmation !== 'EXCLUIR DADOS'}
+                                onClick={deleteContactData}
+                            >
+                                Apagar dados
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
