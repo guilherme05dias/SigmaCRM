@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
 import { SigmaSettingsCard } from '../components/sigma/SigmaSettingsCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
+import { Skeleton, TableSkeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -137,6 +140,7 @@ function formatDateTime(value: string) {
 export default function Settings() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [activeSection, setActiveSection] = useState<SettingsSection>('business-hours');
     const [sessions, setSessions] = useState<WhatsAppSession[]>([]);
     const [whatsAppLoading, setWhatsAppLoading] = useState(false);
@@ -148,13 +152,11 @@ export default function Settings() {
     const [whatsAppOutboxLoading, setWhatsAppOutboxLoading] = useState(false);
     const [whatsAppOutboxRetrying, setWhatsAppOutboxRetrying] = useState(false);
     const [whatsAppOutboxError, setWhatsAppOutboxError] = useState<string | null>(null);
-    const [whatsAppOutboxSuccess, setWhatsAppOutboxSuccess] = useState<string | null>(null);
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
     const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
     const [settingsLoading, setSettingsLoading] = useState(true);
     const [settingsSaving, setSettingsSaving] = useState(false);
     const [settingsError, setSettingsError] = useState<string | null>(null);
-    const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
 
     const loadSettings = () => {
         setSettingsLoading(true);
@@ -180,7 +182,6 @@ export default function Settings() {
     const saveSettings = async () => {
         setSettingsSaving(true);
         setSettingsError(null);
-        setSettingsSuccess(null);
 
         try {
             const data = await apiRequest<SystemSettings>('/api/settings', {
@@ -193,10 +194,12 @@ export default function Settings() {
                 awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
                 closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
             });
-            setSettingsSuccess('Configurações salvas.');
+            showToast({ title: 'Configurações salvas', description: 'As alterações foram aplicadas ao sistema.', variant: 'success' });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setSettingsError(err instanceof Error ? err.message : 'Erro ao salvar configurações.');
+                const message = err instanceof Error ? err.message : 'Erro ao salvar configurações.';
+                setSettingsError(message);
+                showToast({ title: 'Erro ao salvar configurações', description: message, variant: 'error' });
             }
         } finally {
             setSettingsSaving(false);
@@ -291,9 +294,12 @@ export default function Settings() {
             await new Promise((resolve) => window.setTimeout(resolve, 5000));
             loadWhatsAppSessions();
             loadWhatsAppQrCode();
+            showToast({ title: 'Conexão WhatsApp iniciada', description: 'Aguarde o QR Code ou a confirmação da sessão.', variant: 'success' });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setWhatsAppError(err instanceof Error ? err.message : 'Erro ao conectar WhatsApp.');
+                const message = err instanceof Error ? err.message : 'Erro ao conectar WhatsApp.';
+                setWhatsAppError(message);
+                showToast({ title: 'Erro ao conectar WhatsApp', description: message, variant: 'error' });
             }
         } finally {
             setWhatsAppLoading(false);
@@ -308,9 +314,12 @@ export default function Settings() {
             await apiRequest(`/api/whatsapp/sessions/${WHATSAPP_SESSION_ID}/disconnect`, { method: 'POST' });
             setQrCodeDataUrl(null);
             await loadWhatsAppSessions();
+            showToast({ title: 'WhatsApp desconectado', description: 'A sessão foi encerrada com sucesso.', variant: 'success' });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setWhatsAppError(err instanceof Error ? err.message : 'Erro ao desconectar WhatsApp.');
+                const message = err instanceof Error ? err.message : 'Erro ao desconectar WhatsApp.';
+                setWhatsAppError(message);
+                showToast({ title: 'Erro ao desconectar WhatsApp', description: message, variant: 'error' });
             }
         } finally {
             setWhatsAppDisconnecting(false);
@@ -328,9 +337,16 @@ export default function Settings() {
                 body: JSON.stringify({ chatLimit: 100, messageLimit: 50 }),
             });
             setWhatsAppSyncSummary(summary);
+            showToast({
+                title: 'Histórico sincronizado',
+                description: `${summary.importedMessages} mensagens importadas de ${summary.scannedChats} conversas verificadas.`,
+                variant: 'success',
+            });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setWhatsAppError(err instanceof Error ? err.message : 'Erro ao sincronizar histórico do WhatsApp.');
+                const message = err instanceof Error ? err.message : 'Erro ao sincronizar histórico do WhatsApp.';
+                setWhatsAppError(message);
+                showToast({ title: 'Erro ao sincronizar WhatsApp', description: message, variant: 'error' });
             }
         } finally {
             setWhatsAppSyncing(false);
@@ -340,18 +356,23 @@ export default function Settings() {
     const retryWhatsAppOutbox = async () => {
         setWhatsAppOutboxRetrying(true);
         setWhatsAppOutboxError(null);
-        setWhatsAppOutboxSuccess(null);
 
         try {
             const result = await apiRequest<WhatsAppOutboxRetryResponse>('/api/whatsapp/outbox/retry', {
                 method: 'POST',
                 body: JSON.stringify({ limit: 25 }),
             });
-            setWhatsAppOutboxSuccess(`Retry concluído: ${result.scanned} avaliadas, ${result.sent} enviadas e ${result.failed} ainda com falha.`);
+            showToast({
+                title: 'Reenvio concluído',
+                description: `${result.scanned} avaliadas, ${result.sent} enviadas e ${result.failed} ainda com falha.`,
+                variant: result.failed > 0 ? 'warning' : 'success',
+            });
             await loadWhatsAppOutbox();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setWhatsAppOutboxError(err instanceof Error ? err.message : 'Erro ao reprocessar fila de envio WhatsApp.');
+                const message = err instanceof Error ? err.message : 'Erro ao reprocessar fila de envio WhatsApp.';
+                setWhatsAppOutboxError(message);
+                showToast({ title: 'Erro ao reenviar mensagens', description: message, variant: 'error' });
             }
         } finally {
             setWhatsAppOutboxRetrying(false);
@@ -385,15 +406,15 @@ export default function Settings() {
                             <p className="text-muted-foreground text-sm">Configurações do sistema</p>
                         </div>
                         <nav className="flex flex-col gap-2">
-                            <button type="button" onClick={() => goToSection('business-hours')} className={settingsNavClass('business-hours')}>
+                            <button type="button" onClick={() => goToSection('business-hours')} className={settingsNavClass('business-hours')} aria-current={activeSection === 'business-hours' ? 'page' : undefined} aria-controls="business-hours">
                                 <Icon name="schedule" className="size-5" />
                                 <span className="text-sm">Horário de atendimento</span>
                             </button>
-                            <button type="button" onClick={() => goToSection('auto-messages')} className={settingsNavClass('auto-messages')}>
+                            <button type="button" onClick={() => goToSection('auto-messages')} className={settingsNavClass('auto-messages')} aria-current={activeSection === 'auto-messages' ? 'page' : undefined} aria-controls="auto-messages">
                                 <Icon name="chat_bubble" className="size-5" />
                                 <span className="text-sm">Mensagens automáticas</span>
                             </button>
-                            <button type="button" onClick={() => goToSection('whatsapp')} className={settingsNavClass('whatsapp')}>
+                            <button type="button" onClick={() => goToSection('whatsapp')} className={settingsNavClass('whatsapp')} aria-current={activeSection === 'whatsapp' ? 'page' : undefined} aria-controls="whatsapp">
                                 <Icon name="phonelink_setup" className="size-5" />
                                 <span className="text-sm">Integração WhatsApp</span>
                             </button>
@@ -416,12 +437,6 @@ export default function Settings() {
                             {settingsError}
                         </div>
                     )}
-                    {settingsSuccess && (
-                        <div className="rounded-lg border border-success/20 bg-success-soft p-3 text-sm text-success-fg">
-                            {settingsSuccess}
-                        </div>
-                    )}
-
                     {/* Business Hours Section */}
                     <div id="business-hours" className="scroll-mt-24">
                         <SigmaSettingsCard
@@ -439,6 +454,11 @@ export default function Settings() {
                             }
                         >
                             <div className="overflow-x-auto">
+                                {settingsLoading ? (
+                                    <div className="p-6">
+                                        <TableSkeleton rows={7} columns={4} />
+                                    </div>
+                                ) : (
                                 <table className="w-full text-left text-sm">
                                 <thead>
                                     <tr className="bg-surface-alt text-muted-foreground uppercase text-[10px] font-bold tracking-widest">
@@ -485,6 +505,7 @@ export default function Settings() {
                                     ))}
                                 </tbody>
                                 </table>
+                                )}
                             </div>
                         </SigmaSettingsCard>
                     </div>
@@ -505,6 +526,12 @@ export default function Settings() {
                                 </button>
                             }
                         >
+                            {settingsLoading ? (
+                                <div className="grid grid-cols-1 gap-6 p-6 md:grid-cols-2">
+                                    <Skeleton className="h-40" />
+                                    <Skeleton className="h-40" />
+                                </div>
+                            ) : (
                             <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="flex flex-col gap-2">
                                 <label className="text-sm font-bold text-foreground">Mensagem de Saudação</label>
@@ -525,6 +552,7 @@ export default function Settings() {
                                 <p className="text-[10px] text-muted-foreground">Enviada automaticamente fora do horário configurado.</p>
                             </div>
                             </div>
+                            )}
                         </SigmaSettingsCard>
                     </div>
 
@@ -540,6 +568,7 @@ export default function Settings() {
                                             type="button"
                                             onClick={syncWhatsAppHistory}
                                             disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                            aria-label="Sincronizar histórico do WhatsApp"
                                             className="px-4 py-2 bg-surface text-foreground rounded-pill text-sm font-semibold border border-border hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
                                         >
                                             {whatsAppSyncing ? 'Sincronizando...' : 'Sincronizar histórico'}
@@ -550,6 +579,7 @@ export default function Settings() {
                                             type="button"
                                             onClick={disconnectWhatsAppSession}
                                             disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                            aria-label="Desconectar sessão do WhatsApp"
                                             className="px-4 py-2 bg-surface text-danger rounded-pill text-sm font-semibold border border-danger/30 hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
                                         >
                                             {whatsAppDisconnecting ? 'Desconectando...' : 'Desconectar'}
@@ -559,6 +589,7 @@ export default function Settings() {
                                         type="button"
                                         onClick={startWhatsAppSession}
                                         disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                        aria-label={isConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp'}
                                         className="px-4 py-2 bg-primary text-white rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
                                     >
                                         {whatsAppLoading ? 'Conectando...' : isConnected ? 'Reconectar' : 'Conectar WhatsApp'}
@@ -646,6 +677,7 @@ export default function Settings() {
                                             type="button"
                                             onClick={loadWhatsAppOutbox}
                                             disabled={whatsAppOutboxLoading || whatsAppOutboxRetrying}
+                                            aria-label="Atualizar fila de envio WhatsApp"
                                             className="rounded-pill border border-border bg-surface px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-background disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {whatsAppOutboxLoading ? 'Atualizando...' : 'Atualizar'}
@@ -654,6 +686,7 @@ export default function Settings() {
                                             type="button"
                                             onClick={retryWhatsAppOutbox}
                                             disabled={whatsAppOutboxRetrying || whatsAppOutboxLoading || !whatsAppOutbox?.summary.failed}
+                                            aria-label="Reenviar mensagens com falha do WhatsApp"
                                             className="rounded-pill bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {whatsAppOutboxRetrying ? 'Reenviando...' : 'Reenviar falhas'}
@@ -666,12 +699,6 @@ export default function Settings() {
                                         {whatsAppOutboxError}
                                     </div>
                                 )}
-                                {whatsAppOutboxSuccess && (
-                                    <div className="mt-4 rounded-lg border border-success/20 bg-success-soft p-3 text-sm text-success-fg">
-                                        {whatsAppOutboxSuccess}
-                                    </div>
-                                )}
-
                                 <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                                     <div className="rounded-lg border border-border bg-surface p-3">
                                         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pendentes</p>
@@ -723,15 +750,19 @@ export default function Settings() {
                                             ))}
                                             {!whatsAppOutboxLoading && whatsAppOutbox?.items.length === 0 && (
                                                 <tr>
-                                                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                                                        Nenhuma mensagem pendente ou com falha.
+                                                    <td colSpan={5} className="px-3 py-6">
+                                                        <EmptyState
+                                                            icon="check_circle"
+                                                            title="Nenhuma mensagem pendente"
+                                                            description="A fila de envio do WhatsApp não tem falhas ou pendências no momento."
+                                                        />
                                                     </td>
                                                 </tr>
                                             )}
                                             {whatsAppOutboxLoading && (
                                                 <tr>
-                                                    <td colSpan={5} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                                                        Carregando fila de envio...
+                                                    <td colSpan={5} className="px-3 py-6">
+                                                        <TableSkeleton rows={3} columns={5} />
                                                     </td>
                                                 </tr>
                                             )}

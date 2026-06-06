@@ -3,6 +3,9 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { PriorityBadge, StatusBadge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
+import { Skeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -122,13 +125,13 @@ export default function TicketDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [ticket, setTicket] = useState<TicketDetailData | null>(null);
     const [technicians, setTechnicians] = useState<UserOption[]>([]);
     const [form, setForm] = useState<TicketFormState | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState<string | null>(null);
 
     const loadTicket = () => {
         if (!id) return;
@@ -154,7 +157,9 @@ export default function TicketDetail() {
             })
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
-                    setError(err instanceof Error ? err.message : 'Erro ao carregar chamado.');
+                    const message = err instanceof Error ? err.message : 'Erro ao carregar chamado.';
+                    setError(message);
+                    showToast({ title: 'Erro ao carregar chamado', description: message, variant: 'error' });
                 }
             })
             .finally(() => setLoading(false));
@@ -179,7 +184,6 @@ export default function TicketDetail() {
         if (!id || !form) return;
         setSaving(true);
         setError(null);
-        setSuccess(null);
 
         try {
             const updated = await apiRequest<TicketDetailData>(`/api/tickets/${id}`, {
@@ -199,11 +203,13 @@ export default function TicketDetail() {
                 }),
             });
             setTicket(updated);
-            setSuccess('Chamado atualizado.');
+            showToast({ title: 'Chamado atualizado', description: 'As alterações foram salvas com sucesso.', variant: 'success' });
             loadTicket();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao salvar chamado.');
+                const message = err instanceof Error ? err.message : 'Erro ao salvar chamado.';
+                setError(message);
+                showToast({ title: 'Erro ao salvar chamado', description: message, variant: 'error' });
             }
         } finally {
             setSaving(false);
@@ -220,9 +226,40 @@ export default function TicketDetail() {
                     </Link>
 
                     {loading ? (
-                        <div className="rounded-2xl border border-border bg-surface p-8 text-center text-muted-foreground">Carregando chamado...</div>
+                        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]" aria-label="Carregando chamado">
+                            <section className="space-y-6">
+                                <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
+                                    <Skeleton className="h-4 w-32" />
+                                    <Skeleton className="mt-4 h-8 w-3/4" />
+                                    <Skeleton className="mt-3 h-4 w-48" />
+                                </div>
+                                <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
+                                    <Skeleton className="h-5 w-40" />
+                                    <div className="mt-5 grid gap-4 md:grid-cols-2">
+                                        <Skeleton className="h-11 md:col-span-2" />
+                                        <Skeleton className="h-11" />
+                                        <Skeleton className="h-11" />
+                                        <Skeleton className="h-28 md:col-span-2" />
+                                    </div>
+                                </div>
+                            </section>
+                            <aside className="space-y-6">
+                                <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
+                                    <Skeleton className="h-5 w-24" />
+                                    <Skeleton className="mt-5 h-4 w-full" />
+                                    <Skeleton className="mt-3 h-4 w-5/6" />
+                                    <Skeleton className="mt-6 h-11 w-full" />
+                                </div>
+                            </aside>
+                        </div>
                     ) : !ticket || !form ? (
-                        <div className="rounded-2xl border border-danger/20 bg-danger-soft p-8 text-center text-danger-fg">{error || 'Chamado não encontrado.'}</div>
+                        <EmptyState
+                            icon="confirmation_number"
+                            title="Chamado não encontrado"
+                            description={error || 'Não foi possível localizar os dados deste chamado.'}
+                            actionLabel="Voltar para chamados"
+                            onAction={() => navigate('/tickets')}
+                        />
                     ) : (
                         <>
                             <header className="rounded-2xl border border-border bg-surface p-6 shadow-card">
@@ -242,7 +279,6 @@ export default function TicketDetail() {
                             </header>
 
                             {error && <div className="rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">{error}</div>}
-                            {success && <div className="rounded-lg border border-success/20 bg-success-soft p-3 text-sm text-success-fg">{success}</div>}
 
                             <form onSubmit={saveTicket} className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
                                 <section className="space-y-6">
@@ -338,7 +374,11 @@ export default function TicketDetail() {
                                                 <p className="text-muted-foreground">{ticket.evaluation.comment || 'Sem comentário.'}</p>
                                             </div>
                                         ) : (
-                                            <p className="text-sm text-muted-foreground">Sem avaliação registrada.</p>
+                                            <EmptyState
+                                                icon="sentiment_satisfied"
+                                                title="Sem avaliação registrada"
+                                                description="O CSAT aparecerá aqui quando o cliente avaliar o atendimento."
+                                            />
                                         )}
                                     </div>
 
@@ -355,7 +395,11 @@ export default function TicketDetail() {
                                                 ))}
                                             </div>
                                         ) : (
-                                            <p className="text-sm text-muted-foreground">Sem eventos registrados.</p>
+                                            <EmptyState
+                                                icon="schedule"
+                                                title="Sem eventos registrados"
+                                                description="As mudanças de status e atualizações do chamado aparecerão nesta timeline."
+                                            />
                                         )}
                                     </div>
                                 </aside>

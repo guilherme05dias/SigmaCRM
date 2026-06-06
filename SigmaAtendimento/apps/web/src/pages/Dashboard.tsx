@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Icon, type IconName } from '../components/ui/Icon';
+import { Skeleton } from '../components/ui/Skeleton';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -59,11 +61,15 @@ function RankedList({ title, icon, items, labelKey }: { title: string; icon: Ico
             </div>
 
             {items.length === 0 ? (
-                <p className="py-8 text-sm text-muted-foreground">Sem dados no período.</p>
+                <EmptyState
+                    icon={icon}
+                    title="Sem dados no período"
+                    description="Altere o intervalo ou aguarde novos registros da operação."
+                />
             ) : (
                 <div className="space-y-4">
-                    {items.map((item, index) => (
-                        <div key={`${item[labelKey]}-${index}`} className="space-y-2">
+                    {items.map((item) => (
+                        <div key={String(item[labelKey])} className="space-y-2">
                             <div className="flex items-center justify-between gap-3 text-sm">
                                 <span className="truncate font-medium text-foreground">{item[labelKey]}</span>
                                 <span className="font-mono text-muted-foreground">{item.count}</span>
@@ -106,6 +112,18 @@ export default function Dashboard() {
         return Math.round((data.metrics.totalTicketsResolved / data.metrics.totalTicketsOpened) * 100);
     }, [data]);
 
+    const hasOperationalData = useMemo(() => {
+        if (!data) return false;
+        const { metrics } = data;
+        return metrics.totalConversationsOpened > 0
+            || metrics.totalMessages > 0
+            || metrics.totalTicketsOpened > 0
+            || metrics.totalTicketsResolved > 0
+            || metrics.conversationsByDepartment.length > 0
+            || metrics.ticketsByTechnician.length > 0
+            || Boolean(metrics.csat?.count);
+    }, [data]);
+
     return (
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <SigmaSidebarIcon user={user} onLogout={logout} />
@@ -121,8 +139,10 @@ export default function Dashboard() {
                         <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-surface p-1 shadow-card">
                             {ranges.map((item) => (
                                 <button
+                                    type="button"
                                     key={item.value}
                                     onClick={() => setRange(item.value)}
+                                    aria-pressed={range === item.value}
                                     className={`rounded-lg px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${range === item.value
                                         ? 'bg-primary text-white'
                                         : 'text-muted-foreground hover:bg-surface-alt hover:text-foreground'
@@ -135,11 +155,25 @@ export default function Dashboard() {
                     </div>
 
                     {loading ? (
-                        <div className="flex min-h-[360px] items-center justify-center rounded-xl border border-border bg-surface shadow-card">
-                            <div className="size-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                        <div className="flex flex-col gap-6" aria-label="Carregando dashboard">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+                                {Array.from({ length: 5 }).map((_, index) => (
+                                    <Skeleton key={index} className="h-36" />
+                                ))}
+                            </div>
+                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                                <Skeleton className="h-80" />
+                                <Skeleton className="h-80" />
+                            </div>
                         </div>
                     ) : error ? (
-                        <div className="rounded-xl border border-danger/20 bg-danger-soft p-5 text-sm text-danger-fg">{error}</div>
+                        <EmptyState icon="error" title="Erro ao carregar dashboard" description={error} />
+                    ) : data && !hasOperationalData ? (
+                        <EmptyState
+                            icon="dashboard"
+                            title="Sem dados operacionais"
+                            description="Ainda não há conversas, mensagens ou chamados registrados para o intervalo selecionado."
+                        />
                     ) : data ? (
                         <>
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">

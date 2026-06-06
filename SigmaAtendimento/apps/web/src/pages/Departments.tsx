@@ -4,7 +4,10 @@ import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
 import { SigmaMetricCard } from '../components/sigma/SigmaMetricCard';
 import { SigmaTable, SigmaTableRow, SigmaTableCell } from '../components/sigma/SigmaTable';
 import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
+import { TableSkeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -30,6 +33,7 @@ const initialForm: DepartmentFormState = {
 export default function Departments() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [departments, setDepartments] = useState<DepartmentItem[]>([]);
     const [form, setForm] = useState<DepartmentFormState>(initialForm);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -47,7 +51,9 @@ export default function Departments() {
             .then(setDepartments)
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
-                    setError(err instanceof Error ? err.message : 'Erro ao carregar departamentos.');
+                    const message = err instanceof Error ? err.message : 'Erro ao carregar departamentos.';
+                    setError(message);
+                    showToast({ title: 'Erro ao carregar departamentos', description: message, variant: 'error' });
                 }
             })
             .finally(() => setLoading(false));
@@ -108,10 +114,16 @@ export default function Departments() {
                 });
             }
             resetForm();
+            showToast({
+                title: editingId ? 'Departamento atualizado' : 'Departamento criado',
+                description: editingId ? 'As alterações do departamento foram salvas.' : 'O departamento foi criado com sucesso.',
+                variant: 'success',
+            });
             loadDepartments();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao salvar departamento.');
+                const message = err instanceof Error ? err.message : 'Erro ao salvar departamento.';
+                showToast({ title: 'Erro ao salvar departamento', description: message, variant: 'error' });
             }
         } finally {
             setSaving(false);
@@ -122,10 +134,12 @@ export default function Departments() {
         setError(null);
         try {
             await apiRequest<void>(`/api/departments/${department.id}`, { method: 'DELETE' });
+            showToast({ title: 'Departamento inativado', description: `${department.name} foi inativado.`, variant: 'success' });
             loadDepartments();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao inativar departamento.');
+                const message = err instanceof Error ? err.message : 'Erro ao inativar departamento.';
+                showToast({ title: 'Erro ao inativar departamento', description: message, variant: 'error' });
             }
         }
     };
@@ -197,7 +211,9 @@ export default function Departments() {
                     >
                         {loading && (
                             <tr>
-                                <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">Carregando departamentos...</td>
+                                <td colSpan={4} className="px-6 py-6">
+                                    <TableSkeleton rows={5} columns={4} />
+                                </td>
                             </tr>
                         )}
                         {!loading && filteredDepartments.map((department) => (
@@ -223,10 +239,23 @@ export default function Departments() {
                                 </SigmaTableCell>
                                 <SigmaTableCell align="right">
                                     <div className="flex justify-end gap-2">
-                                        <button type="button" onClick={() => editDepartment(department)} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all cursor-pointer" title="Editar">
+                                        <button
+                                            type="button"
+                                            onClick={() => editDepartment(department)}
+                                            className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all cursor-pointer"
+                                            title="Editar"
+                                            aria-label={`Editar departamento ${department.name}`}
+                                        >
                                             <Icon name="edit" className="size-4" />
                                         </button>
-                                        <button type="button" onClick={() => deactivateDepartment(department)} disabled={!department.active} className="p-2 text-muted-foreground hover:text-danger hover:bg-danger-soft rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40" title="Inativar">
+                                        <button
+                                            type="button"
+                                            onClick={() => deactivateDepartment(department)}
+                                            disabled={!department.active}
+                                            className="p-2 text-muted-foreground hover:text-danger hover:bg-danger-soft rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                                            title="Inativar"
+                                            aria-label={`Inativar departamento ${department.name}`}
+                                        >
                                             <Icon name="delete" className="size-4" />
                                         </button>
                                     </div>
@@ -235,7 +264,13 @@ export default function Departments() {
                         ))}
                         {!loading && filteredDepartments.length === 0 && (
                             <tr>
-                                <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">Nenhum departamento encontrado.</td>
+                                <td colSpan={4} className="px-6 py-6">
+                                    <EmptyState
+                                        icon="domain"
+                                        title="Nenhum departamento encontrado"
+                                        description="Ajuste os filtros ou cadastre um departamento para organizar filas e responsáveis."
+                                    />
+                                </td>
                             </tr>
                         )}
                     </SigmaTable>

@@ -1,4 +1,5 @@
 import type { Conversation } from './types';
+import { EmptyState } from '../ui/EmptyState';
 
 interface ContactSidebarProps {
     conversation: Conversation | null;
@@ -14,7 +15,11 @@ export function ContactSidebar({ conversation }: ContactSidebarProps) {
     if (!conversation) {
         return (
             <aside className="hidden w-80 shrink-0 border-l border-border bg-surface p-5 xl:block">
-                <p className="text-sm text-muted-foreground">Nenhum contato selecionado.</p>
+                <EmptyState
+                    icon="forum"
+                    title="Nenhum contato selecionado"
+                    description="Selecione uma conversa para ver os dados do contato, responsavel e departamento."
+                />
             </aside>
         );
     }

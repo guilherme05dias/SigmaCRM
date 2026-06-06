@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import type { Conversation, Message } from './types';
-import { Icon } from '../ui/Icon';
 import { Button } from '../ui/Button';
 import { TicketFromConvModal } from './TicketFromConvModal';
+import { EmptyState } from '../ui/EmptyState';
+import { Skeleton } from '../ui/Skeleton';
 
 interface ChatWindowProps {
     conversation: Conversation | null;
@@ -96,11 +97,11 @@ export function ChatWindow({
     if (!conversation) {
         return (
             <section className="flex flex-1 items-center justify-center bg-background">
-                <div className="text-center">
-                    <Icon name="forum" className="size-12 text-muted-foreground/60 mx-auto" />
-                    <h2 className="mt-4 text-xl font-bold text-foreground">Selecione uma conversa</h2>
-                    <p className="mt-2 text-sm text-muted-foreground">Escolha um atendimento na lista para visualizar as mensagens.</p>
-                </div>
+                <EmptyState
+                    icon="forum"
+                    title="Selecione uma conversa"
+                    description="Escolha um atendimento na lista para visualizar as mensagens e responder o cliente."
+                />
             </section>
         );
     }
@@ -124,7 +125,12 @@ export function ChatWindow({
             <header className="flex items-center justify-between gap-3 border-b border-border bg-surface px-4 py-4 md:px-6">
                 <div className="flex min-w-0 items-center gap-3">
                     {onBack && (
-                        <button type="button" onClick={onBack} className="rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground md:hidden">
+                        <button
+                            type="button"
+                            onClick={onBack}
+                            aria-label="Voltar para a lista de conversas"
+                            className="rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground md:hidden"
+                        >
                             Voltar
                         </button>
                     )}
@@ -156,6 +162,7 @@ export function ChatWindow({
                             <select
                                 value={departmentId}
                                 onChange={(event) => setDepartmentId(event.target.value)}
+                                aria-label="Departamento de destino"
                                 className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                             >
                                 <option value="">Transferir para...</option>
@@ -166,6 +173,7 @@ export function ChatWindow({
                             <button
                                 type="submit"
                                 disabled={!departmentId}
+                                aria-label="Transferir conversa para o departamento selecionado"
                                 className="rounded-pill border border-border bg-surface px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-surface-alt hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                             >
                                 Transferir
@@ -173,7 +181,12 @@ export function ChatWindow({
                         </form>
                     )}
                     {conversation.status === 'OPEN' && (
-                        <button onClick={onTake} className="rounded-pill bg-primary px-5 py-2 text-sm font-semibold text-white shadow-primary-glow hover:bg-primary-700 transition-colors cursor-pointer">
+                        <button
+                            type="button"
+                            onClick={onTake}
+                            aria-label="Assumir esta conversa"
+                            className="rounded-pill bg-primary px-5 py-2 text-sm font-semibold text-white shadow-primary-glow hover:bg-primary-700 transition-colors cursor-pointer"
+                        >
                             Assumir conversa
                         </button>
                     )}
@@ -183,16 +196,47 @@ export function ChatWindow({
             <div ref={containerRef} className="flex-1 overflow-y-auto p-6 scrollbar-thin">
                 {hasMore && (
                     <div className="mb-4 text-center">
-                        <button onClick={onLoadMore} className="rounded-pill border border-border bg-surface px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-surface-alt hover:text-foreground transition-colors cursor-pointer">
-                            Carregar anteriores
+                        <button
+                            type="button"
+                            onClick={onLoadMore}
+                            disabled={isLoading}
+                            aria-label="Carregar mensagens anteriores"
+                            className="rounded-pill border border-border bg-surface px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-surface-alt hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                            {isLoading ? 'Carregando...' : 'Carregar anteriores'}
                         </button>
                     </div>
                 )}
 
                 {isLoading ? (
-                    <div className="text-center text-sm text-muted-foreground">Carregando mensagens...</div>
+                    <div className="space-y-4" aria-label="Carregando mensagens">
+                        <div className="flex justify-start">
+                            <div className="w-[70%] max-w-md rounded-xl border border-border bg-surface p-4">
+                                <Skeleton className="h-4 w-4/5" />
+                                <Skeleton className="mt-2 h-4 w-3/5" />
+                                <Skeleton className="mt-3 h-3 w-24" />
+                            </div>
+                        </div>
+                        <div className="flex justify-end">
+                            <div className="w-[62%] max-w-sm rounded-xl bg-primary/10 p-4">
+                                <Skeleton className="h-4 w-full" />
+                                <Skeleton className="mt-2 h-4 w-1/2" />
+                                <Skeleton className="mt-3 h-3 w-20" />
+                            </div>
+                        </div>
+                        <div className="flex justify-start">
+                            <div className="w-[58%] max-w-sm rounded-xl border border-border bg-surface p-4">
+                                <Skeleton className="h-4 w-3/4" />
+                                <Skeleton className="mt-3 h-3 w-20" />
+                            </div>
+                        </div>
+                    </div>
                 ) : messages.length === 0 ? (
-                    <div className="text-center text-sm text-muted-foreground">Nenhuma mensagem nesta conversa.</div>
+                    <EmptyState
+                        icon="forum"
+                        title="Conversa sem mensagens"
+                        description="As mensagens trocadas com este contato aparecerao aqui."
+                    />
                 ) : (
                     <div className="space-y-4">
                         {messages.map((message) => {
@@ -226,10 +270,16 @@ export function ChatWindow({
                         onChange={(event) => setBody(event.target.value)}
                         rows={2}
                         disabled={conversation.status === 'CLOSED'}
+                        aria-label="Mensagem para o cliente"
                         placeholder={conversation.status === 'CLOSED' ? 'Conversa encerrada' : 'Digite sua mensagem...'}
                         className="min-h-[48px] flex-1 resize-none rounded-lg border border-border bg-surface px-4 py-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
                     />
-                    <button disabled={isSubmitting || !body.trim() || conversation.status === 'CLOSED'} className="rounded-pill bg-primary px-5 py-3 text-sm font-semibold text-white shadow-primary-glow hover:bg-primary-700 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60">
+                    <button
+                        type="submit"
+                        disabled={isSubmitting || !body.trim() || conversation.status === 'CLOSED'}
+                        aria-label="Enviar mensagem"
+                        className="rounded-pill bg-primary px-5 py-3 text-sm font-semibold text-white shadow-primary-glow hover:bg-primary-700 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-60"
+                    >
                         Enviar
                     </button>
                 </div>

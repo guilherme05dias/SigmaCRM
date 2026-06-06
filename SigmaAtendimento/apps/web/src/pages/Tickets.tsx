@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { StatusBadge, PriorityBadge } from '../components/ui/Badge';
+import { EmptyState } from '../components/ui/EmptyState';
+import { TableSkeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -29,6 +32,7 @@ export interface Ticket {
 export default function Tickets() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [statusFilter, setStatusFilter] = useState<string>('');
     const [priorityFilter, setPriorityFilter] = useState<string>('');
@@ -53,7 +57,9 @@ export default function Tickets() {
             .catch(err => {
                 if (!redirectOnUnauthorized(err, navigate)) {
                     console.error(err);
-                    setError(err.message);
+                    const message = err instanceof Error ? err.message : 'Erro ao carregar chamados.';
+                    setError(message);
+                    showToast({ title: 'Erro ao carregar chamados', description: message, variant: 'error' });
                 }
             })
             .finally(() => setIsLoading(false));
@@ -68,8 +74,16 @@ export default function Tickets() {
             method: 'PATCH',
             body: JSON.stringify({ status: newStatus })
         })
-            .then(() => loadTickets())
-            .catch(console.error);
+            .then(() => {
+                showToast({ title: 'Chamado atualizado', description: 'O status do chamado foi alterado.', variant: 'success' });
+                loadTickets();
+            })
+            .catch((err) => {
+                if (!redirectOnUnauthorized(err, navigate)) {
+                    const message = err instanceof Error ? err.message : 'Erro ao atualizar chamado.';
+                    showToast({ title: 'Erro ao atualizar chamado', description: message, variant: 'error' });
+                }
+            });
     }
 
     return (
@@ -134,11 +148,8 @@ export default function Tickets() {
                             <tbody className="divide-y divide-border">
                                 {isLoading && (
                                     <tr>
-                                        <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
-                                            <div className="flex items-center justify-center gap-3 w-full">
-                                                <div className="w-5 h-5 border-2 border-primary/40 border-t-primary rounded-full animate-spin"></div>
-                                                <span>Carregando chamados...</span>
-                                            </div>
+                                        <td colSpan={6} className="px-6 py-6">
+                                            <TableSkeleton rows={6} columns={6} />
                                         </td>
                                     </tr>
                                 )}
@@ -156,10 +167,16 @@ export default function Tickets() {
                                 )}
                                 {!isLoading && !error && tickets.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">Nenhum chamado encontrado.</td>
+                                        <td colSpan={6} className="px-6 py-6">
+                                            <EmptyState
+                                                icon="confirmation_number"
+                                                title="Nenhum chamado encontrado"
+                                                description="Ajuste os filtros ou crie chamados a partir de uma conversa no Inbox."
+                                            />
+                                        </td>
                                     </tr>
                                 )}
-                                {tickets.map(ticket => (
+                                {!isLoading && !error && tickets.map(ticket => (
                                     <tr key={ticket.id} className="hover:bg-surface-alt transition-colors">
                                         <td className="px-6 py-4">
                                             <Link to={`/tickets/${ticket.id}`} className="mb-1 block font-medium text-foreground hover:text-primary">
@@ -190,21 +207,25 @@ export default function Tickets() {
                                         <td className="px-6 py-4 text-right">
                                             {(ticket.status === 'NEW' || ticket.status === 'QUEUED') && (
                                                 <button
+                                                    type="button"
                                                     onClick={() => handleStatusUpdate(ticket.id, 'IN_PROGRESS')}
                                                     className="text-xs font-semibold text-primary hover:text-primary-700 transition-colors cursor-pointer"
+                                                    aria-label={`Iniciar chamado ${ticket.protocol || ticket.title}`}
                                                 >
                                                     Iniciar
                                                 </button>
                                             )}
                                             {ticket.status === 'IN_PROGRESS' && (
                                                 <button
+                                                    type="button"
                                                     onClick={() => handleStatusUpdate(ticket.id, 'RESOLVED')}
                                                     className="text-xs font-semibold text-success hover:text-success-fg transition-colors cursor-pointer"
+                                                    aria-label={`Resolver chamado ${ticket.protocol || ticket.title}`}
                                                 >
                                                     Resolver
                                                 </button>
                                             )}
-                                            <Link to={`/tickets/${ticket.id}`} className="ml-3 text-xs font-semibold text-primary hover:text-primary-700">
+                                            <Link to={`/tickets/${ticket.id}`} className="ml-3 text-xs font-semibold text-primary hover:text-primary-700" aria-label={`Ver detalhes do chamado ${ticket.protocol || ticket.title}`}>
                                                 Detalhes
                                             </Link>
                                         </td>

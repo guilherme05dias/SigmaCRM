@@ -1,5 +1,7 @@
 import { FormEvent, useState } from 'react';
 import type { Conversation } from './types';
+import { EmptyState } from '../ui/EmptyState';
+import { Skeleton } from '../ui/Skeleton';
 
 interface ConversationListProps {
     conversations: Conversation[];
@@ -7,7 +9,7 @@ interface ConversationListProps {
     onSelect: (id: string) => void;
     onStartConversation: (phone: string) => Promise<void>;
     isStartingConversation: boolean;
-    startConversationError: string | null;
+    isLoading: boolean;
     activeTab: 'chats' | 'fila' | 'historico' | 'contatos';
     setActiveTab: (tab: 'chats' | 'fila' | 'historico' | 'contatos') => void;
 }
@@ -45,19 +47,35 @@ export function ConversationList({
     onSelect,
     onStartConversation,
     isStartingConversation,
-    startConversationError,
+    isLoading,
     activeTab,
     setActiveTab,
 }: ConversationListProps) {
     const [phone, setPhone] = useState('');
     const isHistoryTab = activeTab === 'historico';
-    const emptyLabel = activeTab === 'historico'
-        ? 'Nenhum histórico encontrado.'
+    const emptyCopy = activeTab === 'historico'
+        ? {
+            title: 'Nenhum historico encontrado',
+            description: 'Conversas encerradas aparecerao aqui para consulta posterior.',
+            icon: 'forum' as const,
+        }
         : activeTab === 'fila'
-            ? 'Nenhuma conversa na fila.'
+            ? {
+                title: 'Nenhuma conversa na fila',
+                description: 'Novas mensagens recebidas pelo WhatsApp entrarao nesta lista.',
+                icon: 'forum' as const,
+            }
             : activeTab === 'chats'
-                ? 'Nenhuma conversa em atendimento.'
-                : 'Nenhum contato encontrado.';
+                ? {
+                    title: 'Nenhuma conversa em atendimento',
+                    description: 'Assuma uma conversa da fila ou inicie uma conversa pelo telefone do cliente.',
+                    icon: 'forum' as const,
+                }
+                : {
+                    title: 'Nenhum contato encontrado',
+                    description: 'Os contatos aparecem aqui quando houver conversas vinculadas.',
+                    icon: 'group' as const,
+                };
 
     const submit = async (event: FormEvent) => {
         event.preventDefault();
@@ -74,34 +92,34 @@ export function ConversationList({
                     {isHistoryTab ? 'Histórico completo do WhatsApp e atendimentos' : 'Atendimento em tempo real'}
                 </p>
 
-                <form onSubmit={submit} className="mt-4 rounded-xl border border-border bg-surface-alt p-3">
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <form onSubmit={submit} className="mt-4 rounded-xl border border-border bg-surface-alt p-3" aria-label="Iniciar nova conversa">
+                    <label htmlFor="new-conversation-phone" className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Nova conversa
                     </label>
                     <div className="mt-2 flex gap-2">
                         <input
+                            id="new-conversation-phone"
                             value={phone}
                             onChange={(event) => setPhone(event.target.value)}
                             placeholder="5511999999999"
+                            aria-describedby="new-conversation-help"
                             className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
                         />
                         <button
                             type="submit"
                             disabled={isStartingConversation || !phone.trim()}
+                            aria-label="Iniciar conversa pelo numero informado"
                             className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                             {isStartingConversation ? 'Validando...' : 'Iniciar'}
                         </button>
                     </div>
-                    {startConversationError && (
-                        <p className="mt-2 text-xs font-medium text-danger-fg">{startConversationError}</p>
-                    )}
-                    <p className="mt-2 text-[11px] text-muted-foreground">
+                    <p id="new-conversation-help" className="mt-2 text-[11px] text-muted-foreground">
                         O sistema valida se o número tem WhatsApp antes de abrir o atendimento.
                     </p>
                 </form>
 
-                <div className="mt-4 grid grid-cols-4 gap-2 rounded-lg bg-surface-alt p-1">
+                <div className="mt-4 grid grid-cols-4 gap-2 rounded-lg bg-surface-alt p-1" role="tablist" aria-label="Filtros de conversa">
                     {[
                         ['chats', 'Chats'],
                         ['fila', 'Fila'],
@@ -110,6 +128,9 @@ export function ConversationList({
                     ].map(([value, label]) => (
                         <button
                             key={value}
+                            type="button"
+                            role="tab"
+                            aria-selected={activeTab === value}
                             onClick={() => setActiveTab(value as ConversationListProps['activeTab'])}
                             className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors cursor-pointer ${activeTab === value ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-surface hover:text-foreground'}`}
                         >
@@ -120,8 +141,32 @@ export function ConversationList({
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto">
-                {conversations.length === 0 ? (
-                    <div className="p-6 text-sm text-muted-foreground">{emptyLabel}</div>
+                {isLoading ? (
+                    <div className="space-y-4 p-4" aria-label="Carregando conversas">
+                        {Array.from({ length: 6 }).map((_, index) => (
+                            <div key={index} className="rounded-xl border border-border bg-surface p-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1 space-y-2">
+                                        <Skeleton className="h-4 w-36" />
+                                        <Skeleton className="h-3 w-full" />
+                                    </div>
+                                    <Skeleton className="h-3 w-10" />
+                                </div>
+                                <div className="mt-4 flex items-center justify-between gap-2">
+                                    <Skeleton className="h-6 w-20 rounded-full" />
+                                    <Skeleton className="h-3 w-24" />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : conversations.length === 0 ? (
+                    <div className="p-4">
+                        <EmptyState
+                            icon={emptyCopy.icon}
+                            title={emptyCopy.title}
+                            description={emptyCopy.description}
+                        />
+                    </div>
                 ) : (
                     conversations.map((conversation) => {
                         const lastMessage = conversation.messages?.[0];
@@ -131,7 +176,10 @@ export function ConversationList({
                         return (
                             <button
                                 key={conversation.id}
+                                type="button"
                                 onClick={() => onSelect(conversation.id)}
+                                aria-pressed={selected}
+                                aria-label={`Abrir conversa com ${name}`}
                                 className={`w-full border-b border-border p-4 text-left transition-colors cursor-pointer ${selected ? 'bg-primary/10' : 'hover:bg-surface-alt'}`}
                             >
                                 <div className="flex items-start justify-between gap-3">

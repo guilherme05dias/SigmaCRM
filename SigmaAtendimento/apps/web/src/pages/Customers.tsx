@@ -2,7 +2,10 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
+import { TableSkeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -78,6 +81,7 @@ const statusStyles: Record<CustomerStatus, string> = {
 export default function Customers() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [searchParams] = useSearchParams();
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [contacts, setContacts] = useState<CustomerContact[]>([]);
@@ -91,7 +95,6 @@ export default function Customers() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState<string | null>(null);
 
     const canDeleteContactData = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
 
@@ -113,7 +116,9 @@ export default function Customers() {
             })
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
-                    setError(err instanceof Error ? err.message : 'Erro ao carregar clientes.');
+                    const message = err instanceof Error ? err.message : 'Erro ao carregar clientes.';
+                    setError(message);
+                    showToast({ title: 'Erro ao carregar clientes', description: message, variant: 'error' });
                 }
             })
             .finally(() => setLoading(false));
@@ -151,7 +156,6 @@ export default function Customers() {
         event.preventDefault();
         setSaving(true);
         setError(null);
-        setSuccess(null);
 
         const payload = {
             name: form.name,
@@ -176,11 +180,16 @@ export default function Customers() {
             }
             setForm(initialForm);
             setEditingId(null);
-            setSuccess(editingId ? 'Cliente atualizado com sucesso.' : 'Cliente criado com sucesso.');
+            showToast({
+                title: editingId ? 'Cliente atualizado' : 'Cliente criado',
+                description: editingId ? 'As alterações do cliente foram salvas.' : 'O cliente foi cadastrado com sucesso.',
+                variant: 'success',
+            });
             loadCustomers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao salvar cliente.');
+                const message = err instanceof Error ? err.message : 'Erro ao salvar cliente.';
+                showToast({ title: 'Erro ao salvar cliente', description: message, variant: 'error' });
             }
         } finally {
             setSaving(false);
@@ -201,14 +210,18 @@ export default function Customers() {
 
     const deactivateCustomer = async (customer: Customer) => {
         setError(null);
-        setSuccess(null);
         try {
             await apiRequest<void>(`/api/customers/${customer.id}`, { method: 'DELETE' });
-            setSuccess(`Cliente ${customer.name} inativado com sucesso.`);
+            showToast({
+                title: 'Cliente inativado',
+                description: `${customer.name} foi inativado com sucesso.`,
+                variant: 'success',
+            });
             loadCustomers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao inativar cliente.');
+                const message = err instanceof Error ? err.message : 'Erro ao inativar cliente.';
+                showToast({ title: 'Erro ao inativar cliente', description: message, variant: 'error' });
             }
         }
     };
@@ -217,7 +230,6 @@ export default function Customers() {
         setLgpdTarget(contact);
         setLgpdConfirmation('');
         setError(null);
-        setSuccess(null);
     };
 
     const closeLgpdDeletion = () => {
@@ -231,7 +243,6 @@ export default function Customers() {
 
         setDeletingContactId(lgpdTarget.id);
         setError(null);
-        setSuccess(null);
 
         try {
             const result = await apiRequest<ContactDataDeletionResponse>(`/api/contacts/${lgpdTarget.id}/data`, {
@@ -239,15 +250,18 @@ export default function Customers() {
             });
 
             const deleted = result.deleted;
-            setSuccess(
-                `Dados do contato apagados: ${deleted.contacts} contato, ${deleted.conversations} conversas, ${deleted.messages} mensagens e ${deleted.tickets} tickets removidos.`
-            );
+            showToast({
+                title: 'Dados do contato apagados',
+                description: `${deleted.contacts} contato, ${deleted.conversations} conversas, ${deleted.messages} mensagens e ${deleted.tickets} tickets removidos.`,
+                variant: 'success',
+            });
             setLgpdTarget(null);
             setLgpdConfirmation('');
             loadCustomers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao apagar dados do contato.');
+                const message = err instanceof Error ? err.message : 'Erro ao apagar dados do contato.';
+                showToast({ title: 'Erro ao apagar dados do contato', description: message, variant: 'error' });
             }
         } finally {
             setDeletingContactId(null);
@@ -309,11 +323,7 @@ export default function Customers() {
                             </select>
                         </div>
 
-                        {(error || success) && (
-                            <div className={`mb-4 rounded-lg border p-3 text-sm ${error ? 'border-danger/20 bg-danger-soft text-danger-fg' : 'border-success/20 bg-success-soft text-success-fg'}`}>
-                                {error || success}
-                            </div>
-                        )}
+                        {error && <div className="mb-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">{error}</div>}
 
                         <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-card">
                             <div className="overflow-x-auto">
@@ -330,12 +340,20 @@ export default function Customers() {
                                     <tbody className="divide-y divide-border">
                                         {loading && (
                                             <tr>
-                                                <td colSpan={5} className="px-5 py-12 text-center text-muted-foreground">Carregando clientes...</td>
+                                                <td colSpan={5} className="px-5 py-6">
+                                                    <TableSkeleton rows={5} columns={5} />
+                                                </td>
                                             </tr>
                                         )}
                                         {!loading && customers.length === 0 && (
                                             <tr>
-                                                <td colSpan={5} className="px-5 py-12 text-center text-muted-foreground">Nenhum cliente encontrado.</td>
+                                                <td colSpan={5} className="px-5 py-6">
+                                                    <EmptyState
+                                                        icon="business"
+                                                        title="Nenhum cliente encontrado"
+                                                        description="Ajuste os filtros ou cadastre um novo cliente para iniciar o relacionamento."
+                                                    />
+                                                </td>
                                             </tr>
                                         )}
                                         {!loading && customers.map((customer) => (
@@ -385,10 +403,22 @@ export default function Customers() {
                                                 </td>
                                                 <td className="px-5 py-4">
                                                     <div className="flex justify-end gap-2">
-                                                        <button onClick={() => editCustomer(customer)} className="rounded-lg p-2 text-muted-foreground hover:bg-surface-alt hover:text-primary transition-colors cursor-pointer" title="Editar">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => editCustomer(customer)}
+                                                            className="rounded-lg p-2 text-muted-foreground hover:bg-surface-alt hover:text-primary transition-colors cursor-pointer"
+                                                            title="Editar"
+                                                            aria-label={`Editar cliente ${customer.name}`}
+                                                        >
                                                             <Icon name="edit" className="size-4" />
                                                         </button>
-                                                        <button onClick={() => deactivateCustomer(customer)} className="rounded-lg p-2 text-muted-foreground hover:bg-danger-soft hover:text-danger transition-colors cursor-pointer" title="Inativar">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => deactivateCustomer(customer)}
+                                                            className="rounded-lg p-2 text-muted-foreground hover:bg-danger-soft hover:text-danger transition-colors cursor-pointer"
+                                                            title="Inativar"
+                                                            aria-label={`Inativar cliente ${customer.name}`}
+                                                        >
                                                             <Icon name="block" className="size-4" />
                                                         </button>
                                                     </div>
@@ -406,8 +436,6 @@ export default function Customers() {
                             <h2 className="text-lg font-bold text-foreground">{editingId ? 'Editar cliente' : 'Novo cliente'}</h2>
                             <p className="mt-1 text-sm text-muted-foreground">Dados comerciais usados nos contatos, tickets e relatórios.</p>
                         </div>
-
-                        {error && <div className="mb-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">{error}</div>}
 
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <label className="block">
@@ -458,7 +486,7 @@ export default function Customers() {
             </main>
 
             {lgpdTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="lgpd-delete-title">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="lgpd-delete-title" aria-describedby="lgpd-delete-description">
                     <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-card">
                         <div className="flex items-start gap-3">
                             <div className="rounded-xl bg-danger-soft p-2 text-danger">
@@ -466,7 +494,7 @@ export default function Customers() {
                             </div>
                             <div>
                                 <h2 id="lgpd-delete-title" className="text-lg font-bold text-foreground">Apagar dados do contato</h2>
-                                <p className="mt-1 text-sm text-muted-foreground">
+                                <p id="lgpd-delete-description" className="mt-1 text-sm text-muted-foreground">
                                     Esta acao remove o contato, conversas, mensagens, tickets, avaliacoes, eventos de WhatsApp e mensagens pendentes vinculadas.
                                 </p>
                             </div>

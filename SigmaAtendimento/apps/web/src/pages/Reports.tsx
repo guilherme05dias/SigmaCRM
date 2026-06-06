@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
 import { SigmaMetricCard } from '../components/sigma/SigmaMetricCard';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
+import { Skeleton } from '../components/ui/Skeleton';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -37,6 +39,15 @@ export default function Reports() {
         { value: '90d', label: '90 Dias' },
     ];
 
+    const hasOperationalData = data
+        ? data.metrics.totalConversationsOpened > 0
+            || data.metrics.totalMessages > 0
+            || data.metrics.totalTicketsOpened > 0
+            || data.metrics.totalTicketsResolved > 0
+            || data.metrics.conversationsByDepartment.length > 0
+            || data.metrics.ticketsByTechnician.length > 0
+        : false;
+
     useEffect(() => {
         setLoading(true);
         setError(null);
@@ -67,8 +78,10 @@ export default function Reports() {
                     <div className="flex bg-surface border border-border rounded-xl p-1 shadow-card">
                         {ranges.map(r => (
                             <button
+                                type="button"
                                 key={r.value}
                                 onClick={() => setRange(r.value)}
+                                aria-pressed={range === r.value}
                                 className={`px-4 py-1.5 text-sm rounded-lg transition-all font-medium cursor-pointer ${range === r.value
                                         ? 'bg-primary text-white shadow-sm'
                                         : 'text-muted-foreground hover:text-foreground hover:bg-surface-alt'
@@ -81,13 +94,25 @@ export default function Reports() {
                 </div>
 
                 {loading ? (
-                    <div className="flex items-center justify-center py-20">
-                        <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full" />
+                    <div className="flex flex-col gap-8" aria-label="Carregando relatórios">
+                        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
+                            {Array.from({ length: 4 }).map((_, index) => (
+                                <Skeleton key={index} className="h-32" />
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                            <Skeleton className="h-72" />
+                            <Skeleton className="h-72" />
+                        </div>
                     </div>
                 ) : !data ? (
-                    <div className="text-center py-20 text-muted-foreground bg-surface rounded-xl border border-border shadow-card">
-                        {error || 'Erro ao carregar dados.'}
-                    </div>
+                    <EmptyState icon="error" title="Erro ao carregar relatórios" description={error || 'Erro ao carregar dados.'} />
+                ) : !hasOperationalData ? (
+                    <EmptyState
+                        icon="dashboard"
+                        title="Sem dados no período"
+                        description="Ainda não há conversas, mensagens ou chamados para o intervalo selecionado."
+                    />
                 ) : (
                     <div className="flex flex-col gap-8">
 
@@ -108,8 +133,8 @@ export default function Reports() {
                                 </h3>
                                 {data.metrics.conversationsByDepartment.length > 0 ? (
                                     <div className="flex flex-col gap-4">
-                                        {data.metrics.conversationsByDepartment.map((item, i) => (
-                                            <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
+                                        {data.metrics.conversationsByDepartment.map((item) => (
+                                            <div key={item.department} className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
                                                 <span className="text-sm text-muted-foreground font-medium">
                                                     {item.department}
                                                 </span>
@@ -118,7 +143,11 @@ export default function Reports() {
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="text-sm text-muted-foreground italic py-4">Nenhum dado no período.</div>
+                                    <EmptyState
+                                        icon="groups"
+                                        title="Sem departamentos"
+                                        description="Nenhuma conversa foi associada a departamento neste período."
+                                    />
                                 )}
                             </div>
 
@@ -130,20 +159,24 @@ export default function Reports() {
                                 </h3>
                                 {data.metrics.ticketsByTechnician.length > 0 ? (
                                     <div className="flex flex-col gap-4">
-                                        {data.metrics.ticketsByTechnician.map((item, i) => (
-                                            <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
-                                                <span className="text-sm flex items-center gap-3 text-foreground font-medium">
+                                        {data.metrics.ticketsByTechnician.map((item) => (
+                                            <div key={item.technician} className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
+                                                <div className="flex items-center gap-3 text-sm font-medium text-foreground">
                                                     <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs ring-1 ring-border">
                                                         {item.technician.charAt(0)}
                                                     </div>
                                                     {item.technician}
-                                                </span>
+                                                </div>
                                                 <span className="font-mono text-foreground text-base font-bold bg-surface border border-border px-3 py-1 rounded-md">{item.count}</span>
                                             </div>
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="text-sm text-muted-foreground italic py-4">Nenhum dado no período.</div>
+                                    <EmptyState
+                                        icon="engineering"
+                                        title="Sem técnicos"
+                                        description="Nenhum chamado foi associado a técnico neste período."
+                                    />
                                 )}
                             </div>
                         </div>

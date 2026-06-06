@@ -4,7 +4,10 @@ import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
 import { SigmaMetricCard } from '../components/sigma/SigmaMetricCard';
 import { SigmaTable, SigmaTableRow, SigmaTableCell } from '../components/sigma/SigmaTable';
 import { Button } from '../components/ui/Button';
+import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
+import { TableSkeleton } from '../components/ui/Skeleton';
+import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -50,6 +53,7 @@ const initialForm: UserFormState = {
 export default function Users() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [users, setUsers] = useState<UserItem[]>([]);
     const [departments, setDepartments] = useState<DepartmentItem[]>([]);
     const [form, setForm] = useState<UserFormState>(initialForm);
@@ -68,7 +72,9 @@ export default function Users() {
             .then(setUsers)
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
-                    setError(err instanceof Error ? err.message : 'Erro ao carregar usuários.');
+                    const message = err instanceof Error ? err.message : 'Erro ao carregar usuários.';
+                    setError(message);
+                    showToast({ title: 'Erro ao carregar usuários', description: message, variant: 'error' });
                 }
             })
             .finally(() => setLoading(false));
@@ -144,10 +150,16 @@ export default function Users() {
                 });
             }
             resetForm();
+            showToast({
+                title: editingId ? 'Usuário atualizado' : 'Usuário criado',
+                description: editingId ? 'As alterações do usuário foram salvas.' : 'O usuário foi criado com sucesso.',
+                variant: 'success',
+            });
             loadUsers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao salvar usuário.');
+                const message = err instanceof Error ? err.message : 'Erro ao salvar usuário.';
+                showToast({ title: 'Erro ao salvar usuário', description: message, variant: 'error' });
             }
         } finally {
             setSaving(false);
@@ -158,10 +170,12 @@ export default function Users() {
         setError(null);
         try {
             await apiRequest<void>(`/api/users/${user.id}`, { method: 'DELETE' });
+            showToast({ title: 'Usuário inativado', description: `${user.name} foi inativado.`, variant: 'success' });
             loadUsers();
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setError(err instanceof Error ? err.message : 'Erro ao inativar usuário.');
+                const message = err instanceof Error ? err.message : 'Erro ao inativar usuário.';
+                showToast({ title: 'Erro ao inativar usuário', description: message, variant: 'error' });
             }
         }
     };
@@ -236,7 +250,9 @@ export default function Users() {
                     >
                         {loading && (
                             <tr>
-                                <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">Carregando usuários...</td>
+                                <td colSpan={5} className="px-6 py-6">
+                                    <TableSkeleton rows={5} columns={5} />
+                                </td>
                             </tr>
                         )}
                         {!loading && filteredUsers.map((user) => (
@@ -271,10 +287,23 @@ export default function Users() {
                                 </SigmaTableCell>
                                 <SigmaTableCell align="right">
                                     <div className="flex justify-end gap-2">
-                                        <button type="button" onClick={() => editUser(user)} className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all cursor-pointer" title="Editar">
+                                        <button
+                                            type="button"
+                                            onClick={() => editUser(user)}
+                                            className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all cursor-pointer"
+                                            title="Editar"
+                                            aria-label={`Editar usuário ${user.name}`}
+                                        >
                                             <Icon name="edit" className="size-4" />
                                         </button>
-                                        <button type="button" onClick={() => deactivateUser(user)} disabled={!user.active} className="p-2 text-muted-foreground hover:text-danger hover:bg-danger-soft rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40" title="Inativar">
+                                        <button
+                                            type="button"
+                                            onClick={() => deactivateUser(user)}
+                                            disabled={!user.active}
+                                            className="p-2 text-muted-foreground hover:text-danger hover:bg-danger-soft rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                                            title="Inativar"
+                                            aria-label={`Inativar usuário ${user.name}`}
+                                        >
                                             <Icon name="delete" className="size-4" />
                                         </button>
                                     </div>
@@ -283,7 +312,13 @@ export default function Users() {
                         ))}
                         {!loading && filteredUsers.length === 0 && (
                             <tr>
-                                <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">Nenhum usuário encontrado.</td>
+                                <td colSpan={5} className="px-6 py-6">
+                                    <EmptyState
+                                        icon="group"
+                                        title="Nenhum usuário encontrado"
+                                        description="Ajuste os filtros ou cadastre um novo usuário para liberar acesso à equipe."
+                                    />
+                                </td>
                             </tr>
                         )}
                     </SigmaTable>

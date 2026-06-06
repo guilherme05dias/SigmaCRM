@@ -9,6 +9,7 @@ import { useInboxSocket } from '../lib/useInboxSocket';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { clearAuthToken, getAuthToken } from '../lib/authToken';
 import { useAuth } from '../lib/auth';
+import { useToast } from '../components/ui/Toast';
 
 interface DepartmentOption {
     id: string;
@@ -19,15 +20,16 @@ interface DepartmentOption {
 export default function Inbox() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
+    const { showToast } = useToast();
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
+    const [isLoadingConversations, setIsLoadingConversations] = useState(true);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isClosingConversation, setIsClosingConversation] = useState(false);
     const [isCreatingTicket, setIsCreatingTicket] = useState(false);
     const [createTicketError, setCreateTicketError] = useState<string | null>(null);
     const [sendError, setSendError] = useState<string | null>(null);
     const [isStartingConversation, setIsStartingConversation] = useState(false);
-    const [startConversationError, setStartConversationError] = useState<string | null>(null);
     const [messages, setMessages] = useState<Message[]>([]);
     const [departments, setDepartments] = useState<DepartmentOption[]>([]);
     const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
@@ -54,15 +56,22 @@ export default function Inbox() {
             return true;
         }
         console.error(err);
+        showToast({
+            title: 'Nao foi possivel concluir a acao',
+            description: err instanceof Error ? err.message : 'Tente novamente em alguns instantes.',
+            variant: 'error',
+        });
         return true;
     };
 
     const loadConversations = () => {
+        setIsLoadingConversations(true);
         apiRequest<Conversation[]>('/api/conversations')
             .then(data => {
                 if (Array.isArray(data)) setConversations(data);
             })
-            .catch(handleApiError);
+            .catch(handleApiError)
+            .finally(() => setIsLoadingConversations(false));
     };
 
     useEffect(() => {
@@ -144,7 +153,6 @@ export default function Inbox() {
 
     const handleStartConversation = async (phone: string) => {
         setIsStartingConversation(true);
-        setStartConversationError(null);
 
         try {
             const result = await apiRequest<{ conversation: Conversation; created: boolean; hasWhatsApp: boolean }>('/api/conversations/start', {
@@ -167,9 +175,18 @@ export default function Inbox() {
             setSelectedConvId(result.conversation.id);
             setActiveTab(result.conversation.status === 'OPEN' ? 'fila' : 'chats');
             loadMessages(result.conversation.id);
+            showToast({
+                title: result.created ? 'Conversa iniciada' : 'Conversa existente aberta',
+                description: 'O contato foi validado no WhatsApp.',
+                variant: 'success',
+            });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
-                setStartConversationError(err instanceof Error ? err.message : 'Erro ao iniciar conversa.');
+                showToast({
+                    title: 'Nao foi possivel iniciar a conversa',
+                    description: err instanceof Error ? err.message : 'Verifique o numero informado e tente novamente.',
+                    variant: 'error',
+                });
             }
         } finally {
             setIsStartingConversation(false);
@@ -179,7 +196,10 @@ export default function Inbox() {
     const handleTakeConversation = () => {
         if (!selectedConvId) return;
         apiRequest(`/api/conversations/${selectedConvId}/take`, { method: 'POST' })
-            .then(() => loadConversations())
+            .then(() => {
+                loadConversations();
+                showToast({ title: 'Conversa assumida', variant: 'success' });
+            })
             .catch(handleApiError);
     };
 
@@ -206,7 +226,10 @@ export default function Inbox() {
             method: 'POST',
             body: JSON.stringify({ departmentId })
         })
-            .then(() => loadConversations())
+            .then(() => {
+                loadConversations();
+                showToast({ title: 'Conversa transferida', variant: 'success' });
+            })
             .catch(handleApiError);
     };
 
@@ -228,6 +251,11 @@ export default function Inbox() {
             setActiveTab('historico');
             loadMessages(selectedConvId);
             loadConversations();
+            showToast({
+                title: 'Conversa encerrada',
+                description: 'O atendimento foi enviado para o historico.',
+                variant: 'success',
+            });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
                 setSendError(err instanceof Error ? err.message : 'Erro ao encerrar conversa.');
@@ -248,6 +276,11 @@ export default function Inbox() {
                 body: JSON.stringify(payload),
             });
             loadConversations();
+            showToast({
+                title: 'Chamado criado',
+                description: 'O chamado foi vinculado a esta conversa.',
+                variant: 'success',
+            });
         } catch (err) {
             if (!redirectOnUnauthorized(err, navigate)) {
                 const message = err instanceof Error ? err.message : 'Erro ao criar chamado.';
@@ -290,7 +323,7 @@ export default function Inbox() {
                 onSelect={handleSelectConversation}
                 onStartConversation={handleStartConversation}
                 isStartingConversation={isStartingConversation}
-                startConversationError={startConversationError}
+                isLoading={isLoadingConversations}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
             />
