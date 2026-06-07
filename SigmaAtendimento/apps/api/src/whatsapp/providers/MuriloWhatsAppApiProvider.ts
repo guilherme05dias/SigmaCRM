@@ -187,7 +187,8 @@ export class MuriloWhatsAppApiProvider implements IWhatsAppProvider {
 
         const payload = await this.readJson<SendMessageResponse>(response);
         if (response.status !== 200 || payload?.status === "restarting") {
-            throw new Error(payload?.message || payload?.error || `Falha ao enviar mensagem WhatsApp (${response.status})`);
+            const details = [payload?.message, payload?.error].filter(Boolean).join(" ");
+            throw new Error(details || `Falha ao enviar mensagem WhatsApp (${response.status})`);
         }
 
         return payload || {};

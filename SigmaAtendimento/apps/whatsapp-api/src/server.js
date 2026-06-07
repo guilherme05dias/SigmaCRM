@@ -356,20 +356,36 @@ app.post('/send-message/:sessionId', async (req, res) => {
     
     // Se passou por todas as verificações, significa que a sessão está OK
     try {
+        const normalizedPhone = String(para || '').replace(/\D/g, '');
+        if (!normalizedPhone) {
+            return res.status(400).json({ message: 'Número de destino obrigatório.' });
+        }
+
+        const numberId = await client.getNumberId(normalizedPhone);
+        if (!numberId?._serialized) {
+            return res.status(404).json({
+                message: 'Número não possui WhatsApp.',
+                exists: false,
+                phone: normalizedPhone,
+            });
+        }
+
+        const destinationId = numberId._serialized;
+
         if (arquivoBase64 && nomeArquivo) {
             // Criar a mídia com o nome do arquivo
             const media = new MessageMedia('application/pdf', arquivoBase64, nomeArquivo);
 
             // Enviar o arquivo sem legenda
-            await client.sendMessage(`${para}@c.us`, media);
+            await client.sendMessage(destinationId, media);
         } else if (mensagem) {
             // Enviar apenas a mensagem de texto
-            await client.sendMessage(`${para}@c.us`, mensagem);
+            await client.sendMessage(destinationId, mensagem);
         } else {
             return res.status(400).json({ message: "Nenhuma mensagem ou arquivo enviado." });
         }
 
-        res.status(200).json({ message: 'Mensagem enviada com sucesso!' });
+        res.status(200).json({ message: 'Mensagem enviada com sucesso!', wid: destinationId });
     } catch (error) {
         console.error('Erro ao enviar mensagem:', error);
         res.status(500).json({ message: 'Erro ao enviar mensagem.', error: error.message });
