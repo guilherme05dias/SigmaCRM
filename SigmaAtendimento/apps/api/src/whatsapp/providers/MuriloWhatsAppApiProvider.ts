@@ -154,7 +154,7 @@ export class MuriloWhatsAppApiProvider implements IWhatsAppProvider {
 
     async parseIncoming(payload: any): Promise<ParsedIncomingPayload> {
         const data = payload?.message || payload?.payload || payload;
-        const fromRaw = data?.from || data?.author || data?._data?.from || "";
+        const fromRaw = data?.phone || data?.number || data?.contact?.phone || data?.from || data?.author || data?._data?.from || "";
         const from = this.normalizePhone(fromRaw);
         const body = data?.body || data?.text || data?.mensagem || "";
         const senderName = data?._data?.notifyName || data?.pushname || data?.name || null;

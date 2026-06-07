@@ -18,6 +18,8 @@ app.use(require('cors')());
 
 const sessionsDir = path.join(__dirname, 'sessions'); // Diretório onde as sessões estão armazenadas
 let sessions = {}; // Armazena as sessões ativas e os QR Codes
+const forwardedIncomingMessageIds = new Set();
+const widPhoneMap = new Map();
 
 function getSessionStatus(client) {
     if (!client) return 'NOT_FOUND';
@@ -68,6 +70,51 @@ async function notifySigmaHistorySync(sessionId) {
     }
 }
 
+async function forwardIncomingMessageToSigma(sessionId, message) {
+    if (message.fromMe) return;
+
+    const messageId = message.id?.id || message.id?._serialized || String(Date.now());
+    const dedupeKey = `${sessionId}:${messageId}`;
+    if (forwardedIncomingMessageIds.has(dedupeKey)) return;
+    forwardedIncomingMessageIds.add(dedupeKey);
+
+    try {
+        const contact = await message.getContact();
+        const wid = contact.id?._serialized || message.from;
+        const contactPhone = String(widPhoneMap.get(wid) || contact.number || contact.id?.user || message.from || '').replace(/\D/g, '');
+        const payload = {
+            provider: 'murilo-api',
+            sessionId,
+            payload: {
+                id: messageId,
+                from: message.from,
+                phone: contactPhone,
+                wid,
+                body: message.body || message.caption || '',
+                hasMedia: message.hasMedia,
+                type: message.type,
+                timestamp: message.timestamp,
+                pushname: contact.pushname || contact.name || contact.shortName || null,
+                _data: {
+                    notifyName: contact.pushname || contact.name || contact.shortName || null,
+                },
+            },
+        };
+
+        const response = await fetch(sigmaWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            console.error(`Falha ao encaminhar mensagem para Sigma: ${response.status}`);
+        }
+    } catch (error) {
+        console.error('Erro ao encaminhar mensagem recebida para Sigma:', error);
+    }
+}
+
 // Função para criar um cliente para um número de telefone específico
 function createClient(sessionId) {
     const client = new Client({
@@ -96,39 +143,11 @@ function createClient(sessionId) {
     });
 
     client.on('message', async (message) => {
-        if (message.fromMe) return;
+        await forwardIncomingMessageToSigma(sessionId, message);
+    });
 
-        try {
-            const contact = await message.getContact();
-            const payload = {
-                provider: 'murilo-api',
-                sessionId,
-                payload: {
-                    id: message.id?.id || String(Date.now()),
-                    from: message.from,
-                    body: message.body,
-                    hasMedia: message.hasMedia,
-                    type: message.type,
-                    timestamp: message.timestamp,
-                    pushname: contact.pushname || contact.name || contact.shortName || null,
-                    _data: {
-                        notifyName: contact.pushname || contact.name || contact.shortName || null,
-                    },
-                },
-            };
-
-            const response = await fetch(sigmaWebhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-
-            if (!response.ok) {
-                console.error(`Falha ao encaminhar mensagem para Sigma: ${response.status}`);
-            }
-        } catch (error) {
-            console.error('Erro ao encaminhar mensagem recebida para Sigma:', error);
-        }
+    client.on('message_create', async (message) => {
+        await forwardIncomingMessageToSigma(sessionId, message);
     });
 
     client.initialize();
@@ -299,6 +318,7 @@ app.post('/check-number/:sessionId', async (req, res) => {
             wid: numberId._serialized,
             name,
         });
+        widPhoneMap.set(numberId._serialized, normalizedPhone);
     } catch (error) {
         console.error(`Erro ao validar número ${normalizedPhone}:`, error);
         res.status(500).json({ message: 'Erro ao validar número no WhatsApp.', error: error.message, exists: false });
@@ -371,6 +391,7 @@ app.post('/send-message/:sessionId', async (req, res) => {
         }
 
         const destinationId = numberId._serialized;
+        widPhoneMap.set(destinationId, normalizedPhone);
 
         if (arquivoBase64 && nomeArquivo) {
             // Criar a mídia com o nome do arquivo
