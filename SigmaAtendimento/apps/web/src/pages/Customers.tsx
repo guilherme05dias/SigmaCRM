@@ -108,7 +108,7 @@ export default function Customers() {
 
         Promise.all([
             apiRequest<Customer[]>(`/api/customers${params.toString() ? `?${params}` : ''}`),
-            apiRequest<CustomerContact[]>('/api/contacts'),
+            apiRequest<CustomerContact[]>('/api/contacts?take=500'),
         ])
             .then(([customerData, contactData]) => {
                 setCustomers(customerData);
@@ -392,9 +392,9 @@ export default function Customers() {
                                                                         )}
                                                                     </div>
                                                                 ))}
-                                                                {(customer._count?.contacts || 0) > (contactsByCustomer.get(customer.id) || []).length && (
+                                                                {(customer._count?.contacts || 0) > Math.min(3, (contactsByCustomer.get(customer.id) || []).length) && (
                                                                     <p className="text-[11px] text-muted-foreground">
-                                                                        +{(customer._count?.contacts || 0) - (contactsByCustomer.get(customer.id) || []).length} contatos nao exibidos
+                                                                        +{(customer._count?.contacts || 0) - Math.min(3, (contactsByCustomer.get(customer.id) || []).length)} contatos nao exibidos
                                                                     </p>
                                                                 )}
                                                             </div>

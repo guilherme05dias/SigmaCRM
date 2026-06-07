@@ -53,7 +53,6 @@ interface WhatsAppOutboxRetryResponse {
     failed: number;
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3334';
 const WHATSAPP_SESSION_ID = 'default';
 type SettingsSection = 'business-hours' | 'auto-messages' | 'whatsapp';
 type BusinessHourStatus = 'OPEN' | 'SPECIAL' | 'CLOSED';
@@ -633,12 +632,12 @@ export default function Settings() {
                                             <p className="mb-4 text-sm font-semibold text-foreground">Escaneie para conectar</p>
                                             <img src={qrCodeDataUrl} alt="QR Code do WhatsApp" className="mx-auto w-full max-w-[320px] rounded-lg bg-white p-3" />
                                             <a
-                                                href={`${API_BASE_URL}/api/whatsapp/sessions/${WHATSAPP_SESSION_ID}/qrcode-page`}
+                                                href={qrCodeDataUrl}
                                                 target="_blank"
                                                 rel="noreferrer"
                                                 className="mt-4 inline-flex text-xs font-semibold text-primary hover:text-primary-700"
                                             >
-                                                Abrir QR em tela cheia
+                                                Abrir imagem do QR
                                             </a>
                                         </div>
                                     ) : (

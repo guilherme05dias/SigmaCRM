@@ -1,6 +1,6 @@
 # Sigma — Plano de Ação (gaps pós-design system)
 
-**Data:** 2026-06-06 · **Status:** proposta para execução · **Base:**
+**Data:** 2026-06-07 · **Status:** execução avançada pós-C7 · **Base:**
 [EXECUTION_SUMMARY.md](EXECUTION_SUMMARY.md) · [DESIGN_SYSTEM_WEB.md](DESIGN_SYSTEM_WEB.md) ·
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md)
 
@@ -18,11 +18,15 @@ bloqueante para o polimento.
 - **C3 preparado em SQL:** migration `20260606000200_enable_tenant_rls` adiciona RLS nas
   tabelas de negócio usando `app.current_company_id`. O backend Prisma continua usando
   `companyScope`; validação final deve acontecer no Supabase com role sujeita a RLS.
-- **C5 iniciado:** rota LGPD `DELETE /api/contacts/:id/data` remove contato, conversas,
-  mensagens, tickets e eventos/outbox associados.
+- **C5 concluído com ressalvas:** rota LGPD `DELETE /api/contacts/:id/data` e UI
+  administrativa em Clientes. Falta retenção automática/configurável.
 - **C6 preparado:** API ganhou `Dockerfile`, web ganhou `_redirects` para SPA e CORS ficou
   restrito por `CORS_ORIGIN`.
-- **C7 iniciado:** paginação real de mensagens no backend e no Inbox.
+- **C7 concluído com ressalvas:** paginação real de mensagens, toasts, skeletons,
+  empty states e acessibilidade básica. Falta validação visual/mobile manual profunda.
+- **Correções 2026-06-07:** endpoints operacionais WhatsApp protegidos por auth/role,
+  limpeza de dados limitada ao tenant, `Contact.phone` único por empresa, join socket
+  validado por empresa, e validação de IDs relacionados por tenant.
 - Validação local: `npm run build` no monorepo passou para API e web.
 
 > **Legenda de esforço:** 🟢 pequeno (<1h) · 🟡 médio (1–3h) · 🔴 grande (>3h)
@@ -70,9 +74,8 @@ hardcoded. Quem logar como `agente@acme.com` continua vendo "Admin".
 **Arquivos.** `apps/api/src/routes/auth.routes.ts`, `apps/web/src/lib/auth.tsx` (novo),
 `apps/web/src/App.tsx`, `apps/web/src/main.tsx`, e as 8 páginas.
 
-**Decisão pendente.** ⚠️ JWT-only (mais simples) **vs** JWT + `/api/auth/me` (mais
-correto, permite atualizar perfil sem relogar). **Recomendado:** os dois — JWT carrega
-`name`/`role` para render imediato, `/me` valida e atualiza.
+**Decisão resolvida.** JWT + `/api/auth/me` — JWT carrega `name`/`role` para render
+imediato; `/me` valida e atualiza.
 
 **Critério de pronto.** Logar com 2 usuários diferentes mostra nomes/iniciais distintos
 em todas as telas; refresh mantém; logout limpa.
@@ -156,9 +159,8 @@ abrir do histórico mostra todas as mensagens em leitura.
 **Arquivos.** `Inbox.tsx`, `components/inbox/ChatWindow.tsx`,
 `components/inbox/TicketFromConvModal.tsx` (novo).
 
-**Decisão pendente.** ⚠️ Modal completo (todos os campos de field service) **vs** mínimo
-(título + prioridade, completar depois na tela de Tickets). **Recomendado:** mínimo na W1,
-completo na W2 (item B1).
+**Decisão resolvida.** Modal mínimo no Inbox; campos completos ficam na tela de detalhe
+do ticket.
 
 **Critério de pronto.** Encerrar e criar ticket a partir de uma conversa real funcionam
 ponta-a-ponta com atualização em tempo real.
@@ -170,7 +172,7 @@ ponta-a-ponta com atualização em tempo real.
 Objetivo: fechar os fluxos de **atendimento** e **CRM** que hoje têm backend mas não têm
 tela completa.
 
-## B1 · Tela de detalhe do Ticket 🔴 / 🔴
+## ✅ B1 · Tela de detalhe do Ticket 🔴 / 🔴
 
 **Problema.** A lista de Tickets mostra status/prioridade, mas não há como ver descrição,
 timeline, field service, CSAT, notas internas, nem editar.
@@ -262,28 +264,25 @@ renderizar `evaluation`.
 
 ---
 
-## B5 · Roteamento de WhatsApp por departamento 🟡 / 🔴
+## ✅ B5 · Fila manual/geral do WhatsApp 🟡 / 🔴
 
-**Problema.** Decisão de arquitetura é "um número, vários departamentos" mas a entrada
-não roteia — toda conversa nova cai sem departamento.
+**Problema.** Decisão de arquitetura é "um número, vários departamentos", mas a decisão
+de negócio atual é operar em fila geral/manual, sem bot nem isolamento automático por
+departamento.
 
-**Como deve funcionar.** Mensagem nova de número desconhecido → menu/regra de
-roteamento (ex.: "1 Suporte, 2 Financeiro") → conversa entra na **fila do departamento**
-escolhido. Atendentes só veem a fila do(s) seu(s) departamento(s).
+**Como deve funcionar.** Mensagem nova entra na **fila geral** (`OPEN`,
+`departmentId=null`). Atendente assume ou supervisor transfere manualmente.
 
-**Abordagem técnica.** No webhook (`whatsapp.routes.ts`), ao criar conversa: aplicar
-regra de roteamento (configurável em Settings); persistir `departmentId`. Filtrar
-`GET /api/conversations` pelo departamento do agente (exceto ADMIN/SUPERVISOR).
+**Abordagem técnica.** Webhook cria conversa em fila geral. Inbox permite assumir e
+transferir manualmente. Roteamento automático fica fora do escopo atual.
 
 **Arquivos.** `apps/api/src/routes/whatsapp.routes.ts`, `conversations.routes.ts`,
 `Settings` (regras), possivelmente novo `services/routing.service.ts`.
 
-**Decisão pendente.** ⚠️ Roteamento por **menu interativo** (bot pergunta) **vs**
-**fixo por regra** (palavra-chave/horário) **vs** **manual** (cai numa fila geral e o
-supervisor distribui). **Precisa de definição de negócio.**
+**Decisão resolvida.** Fila manual/geral.
 
-**Critério de pronto.** Mensagem nova entra na fila correta; agente de Suporte não vê
-fila do Financeiro.
+**Critério de pronto.** Mensagem nova entra na Fila; atendente assume; supervisor
+transfere manualmente quando necessário.
 
 ---
 
@@ -402,7 +401,7 @@ Acme), `transfer` de uma conversa da DragonByte → socket DragonByte recebeu
 
 ---
 
-## C5 · LGPD / política de retenção 🟢 / 🟡
+## ✅ C5 · LGPD / política de retenção 🟢 / 🟡
 
 **Problema.** Páginas legais existem, mas não há mecanismo de exclusão/retenção.
 
@@ -411,8 +410,9 @@ configurável.
 
 **Critério de pronto.** Rota de exclusão de dados de um contato; documentado.
 
-**Status 2026-06-06.** Rota `DELETE /api/contacts/:id/data` criada para ADMIN/SUPERVISOR.
-Ainda falta tela administrativa/fluxo operacional e política de retenção automática.
+**Status 2026-06-07.** Rota `DELETE /api/contacts/:id/data` criada para ADMIN/SUPERVISOR
+e exposta na tela de Clientes com confirmação forte. Ainda falta política de retenção
+automática/configurável.
 
 ---
 
@@ -431,13 +431,14 @@ Falta provisionar Supabase/provedor e configurar variáveis reais.
 
 ---
 
-## C7 · Polimento de UX 🟢 / 🟡
+## ✅ C7 · Polimento de UX 🟢 / 🟡
 
 - ✅ Paginação real de mensagens quando a conversa cresce.
-- Estados de loading/skeleton nas listas.
-- Toasts de sucesso/erro padronizados (hoje cada tela trata inline).
-- Acessibilidade: foco em modais, `aria-*` em ícones-botão, navegação por teclado.
-- Empty states ilustrados.
+- ✅ Estados de loading/skeleton nas listas.
+- ✅ Toasts de sucesso/erro padronizados.
+- ✅ Acessibilidade básica: `aria-*` em botões/abas/modais críticos.
+- ✅ Empty states.
+- Ressalva: falta validação visual/mobile e navegação por teclado profunda.
 
 ---
 

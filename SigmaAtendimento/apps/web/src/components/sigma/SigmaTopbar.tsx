@@ -71,11 +71,14 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
                             onClick={() => setShowNotifications((current) => !current)}
                             className="p-2 text-muted-foreground hover:bg-surface-alt hover:text-foreground rounded-xl transition-colors relative"
                             title="Notificações"
+                            aria-label="Abrir notificações"
+                            aria-expanded={showNotifications}
+                            aria-controls="sigma-notifications-menu"
                         >
                             <Icon name="notifications" className="size-5" />
                         </button>
                         {showNotifications && (
-                            <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-border bg-surface p-4 shadow-lifted z-50">
+                            <div id="sigma-notifications-menu" className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-border bg-surface p-4 shadow-lifted z-50">
                                 <p className="text-sm font-semibold text-foreground">Notificações</p>
                                 <p className="mt-2 text-sm text-muted-foreground">Nenhuma notificação nova no momento.</p>
                             </div>
@@ -95,18 +98,22 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
                                 onClick={() => setShowAccount((current) => !current)}
                                 className="size-10 rounded-full border-2 border-primary/20 p-0.5 bg-primary-50 flex items-center justify-center text-primary font-bold cursor-pointer"
                                 title="Menu da conta"
+                                aria-label="Abrir menu da conta"
+                                aria-expanded={showAccount}
+                                aria-controls="sigma-account-menu"
                             >
                                 {user?.name?.charAt(0).toUpperCase() || 'U'}
                             </button>
 
                             {showAccount && (
-                            <div className="absolute right-0 top-full mt-2 w-40 z-50">
+                            <div id="sigma-account-menu" className="absolute right-0 top-full mt-2 w-40 z-50">
                                 <div className="bg-surface border border-border rounded-lg shadow-lifted py-1 overflow-hidden">
                                     <div className="px-4 py-2 border-b border-border">
                                         <p className="text-sm font-semibold text-foreground">{user?.name || 'Usuário'}</p>
                                         <p className="truncate text-xs text-muted-foreground">{user?.email || user?.role || 'Agente'}</p>
                                     </div>
                                     <button
+                                        type="button"
                                         onClick={onLogout}
                                         className="w-full text-left px-4 py-2 text-sm text-danger hover:bg-danger-soft transition-colors"
                                     >

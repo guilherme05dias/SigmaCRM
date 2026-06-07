@@ -1,5 +1,6 @@
-import { Router, Request, Response as ExpressResponse } from 'express';
+import { Router, Request, Response as ExpressResponse, NextFunction } from 'express';
 import { OutboxStatus } from '@prisma/client';
+import { createHash } from 'crypto';
 import { prisma } from '../lib/prisma';
 import { getWhatsAppProvider } from '../whatsapp';
 import { getIO, emitToCompany } from '../socket';
@@ -12,6 +13,13 @@ import { currentWhatsAppProvider, retryFailedOutbox, sendTextWithOutbox } from '
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
 const muriloApiBaseUrl = (process.env.MURILO_WHATSAPP_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+function requireWhatsAppAdmin(req: Request, res: ExpressResponse, next: NextFunction) {
+    if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role || '')) {
+        return res.status(403).json({ error: 'Apenas administradores ou supervisores podem gerenciar o WhatsApp.' });
+    }
+    next();
+}
 
 async function getWebhookCompanyId(): Promise<string> {
     const configuredCompanyId = process.env.DEFAULT_COMPANY_ID || process.env.SIGMA_DEFAULT_COMPANY_ID;
@@ -43,17 +51,17 @@ async function getWebhookCompanyId(): Promise<string> {
     return company.id;
 }
 
-async function clearWhatsAppOperationalData(): Promise<void> {
+async function clearWhatsAppOperationalData(companyId: string): Promise<void> {
     await prisma.$transaction([
-        prisma.ticketTimeline.deleteMany(),
-        prisma.ticketEvaluation.deleteMany(),
-        prisma.ticketFieldService.deleteMany(),
-        prisma.message.deleteMany(),
-        prisma.ticket.deleteMany(),
-        prisma.conversation.deleteMany(),
-        prisma.whatsAppOutbox.deleteMany(),
-        prisma.whatsAppInboundEvent.deleteMany(),
-        prisma.counter.deleteMany(),
+        prisma.ticketTimeline.deleteMany({ where: { companyId } }),
+        prisma.ticketEvaluation.deleteMany({ where: { companyId } }),
+        prisma.ticketFieldService.deleteMany({ where: { companyId } }),
+        prisma.message.deleteMany({ where: { companyId } }),
+        prisma.ticket.deleteMany({ where: { companyId } }),
+        prisma.conversation.deleteMany({ where: { companyId } }),
+        prisma.whatsAppOutbox.deleteMany({ where: { companyId } }),
+        prisma.whatsAppInboundEvent.deleteMany({ where: { companyId } }),
+        prisma.counter.deleteMany({ where: { companyId } }),
     ]);
 }
 
@@ -72,7 +80,15 @@ async function readJson<T>(response: globalThis.Response): Promise<T | null> {
     }
 }
 
-router.get('/sessions', async (_req: Request, res: ExpressResponse) => {
+function stableInboundMessageId(payload: unknown, phone: string, message: { type?: string; body?: string; mediaUrl?: string }) {
+    const hash = createHash('sha256')
+        .update(JSON.stringify({ phone, type: message.type, body: message.body, mediaUrl: message.mediaUrl, payload }))
+        .digest('hex')
+        .slice(0, 48);
+    return `in_${hash}`;
+}
+
+router.get('/sessions', authMiddleware, requireWhatsAppAdmin, async (_req: Request, res: ExpressResponse) => {
     try {
         const sessions = await whatsappProvider.listSessions();
         res.json(sessions);
@@ -81,9 +97,10 @@ router.get('/sessions', async (_req: Request, res: ExpressResponse) => {
     }
 });
 
-router.post('/sessions/:sessionId/start', async (req: Request, res: ExpressResponse) => {
+router.post('/sessions/:sessionId/start', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
-        await clearWhatsAppOperationalData();
+        const companyId = getCompanyId(req);
+        await clearWhatsAppOperationalData(companyId);
         await whatsappProvider.createSession(req.params.sessionId);
         res.status(202).json({ ok: true });
     } catch (error: any) {
@@ -91,7 +108,7 @@ router.post('/sessions/:sessionId/start', async (req: Request, res: ExpressRespo
     }
 });
 
-router.post('/sessions/:sessionId/disconnect', async (req: Request, res: ExpressResponse) => {
+router.post('/sessions/:sessionId/disconnect', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
         await whatsappProvider.disconnectSession(req.params.sessionId);
         res.status(200).json({ ok: true, status: 'DISCONNECTED' });
@@ -100,9 +117,9 @@ router.post('/sessions/:sessionId/disconnect', async (req: Request, res: Express
     }
 });
 
-router.post('/sessions/:sessionId/sync-history', async (req: Request, res: ExpressResponse) => {
+router.post('/sessions/:sessionId/sync-history', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
-        const companyId = await getWebhookCompanyId();
+        const companyId = getCompanyId(req);
         const chatLimit = Math.max(1, Math.min(Number(req.body?.chatLimit || req.query.chatLimit || 100), 500));
         const messageLimit = Math.max(1, Math.min(Number(req.body?.messageLimit || req.query.messageLimit || 50), 200));
         const chats = await whatsappProvider.syncHistory({
@@ -119,7 +136,7 @@ router.post('/sessions/:sessionId/sync-history', async (req: Request, res: Expre
             const phone = String(chat.phone || '').replace(/\D/g, '');
             if (phone.length < 10) continue;
 
-            let contact = await prisma.contact.findUnique({ where: { phone } });
+            let contact = await prisma.contact.findFirst({ where: { companyId, phone } });
             if (!contact) {
                 contact = await prisma.contact.create({
                     data: {
@@ -243,7 +260,7 @@ router.post('/sessions/:sessionId/sync-history', async (req: Request, res: Expre
     }
 });
 
-router.get('/sessions/:sessionId/qrcode', async (req: Request, res: ExpressResponse) => {
+router.get('/sessions/:sessionId/qrcode', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
         if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'murilo-api') {
             return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api' });
@@ -262,7 +279,7 @@ router.get('/sessions/:sessionId/qrcode', async (req: Request, res: ExpressRespo
     }
 });
 
-router.get('/sessions/:sessionId/qrcode-image', async (req: Request, res: ExpressResponse) => {
+router.get('/sessions/:sessionId/qrcode-image', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
         if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'murilo-api') {
             return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api' });
@@ -281,7 +298,7 @@ router.get('/sessions/:sessionId/qrcode-image', async (req: Request, res: Expres
     }
 });
 
-router.get('/sessions/:sessionId/qrcode-page', async (req: Request, res: ExpressResponse) => {
+router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
         if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'murilo-api') {
             return res.status(400).send('QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api');
@@ -323,7 +340,7 @@ router.get('/sessions/:sessionId/qrcode-page', async (req: Request, res: Express
     }
 });
 
-router.get('/outbox', authMiddleware, async (req: Request, res: ExpressResponse) => {
+router.get('/outbox', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
         const companyId = getCompanyId(req);
         const limit = Math.max(1, Math.min(Number(req.query.limit || 25), 100));
@@ -400,7 +417,7 @@ router.get('/outbox', authMiddleware, async (req: Request, res: ExpressResponse)
     }
 });
 
-router.post('/outbox/retry', authMiddleware, async (req: Request, res: ExpressResponse) => {
+router.post('/outbox/retry', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
         const companyId = getCompanyId(req);
         const limit = Math.max(1, Math.min(Number(req.body?.limit || 25), 100));
@@ -429,7 +446,7 @@ router.get(['/webhook', '/webhooks/meta'], (req: Request, res: ExpressResponse) 
 });
 
 // Main Webhook endpoint for Meta Cloud API messages and events
-router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], async (req: Request, res: ExpressResponse) => {
+async function processIncomingWebhook(req: Request, res: ExpressResponse) {
     try {
         const payload = req.body;
         console.log('Received WhatsApp Webhook:', JSON.stringify(payload, null, 2));
@@ -446,8 +463,8 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
         const companyId = await getWebhookCompanyId();
 
         // Find or create Contact
-        let contact = await prisma.contact.findUnique({
-            where: { phone },
+        let contact = await prisma.contact.findFirst({
+            where: { companyId, phone },
         });
 
         if (!contact) {
@@ -496,7 +513,7 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
                         data: {
                             companyId,
                             provider: currentWhatsAppProvider(),
-                            providerMessageId: msg.waMessageId || `in_${phone}_${Date.now()}`,
+                            providerMessageId: msg.waMessageId || stableInboundMessageId(payload, phone, msg),
                             fromPhone: phone,
                             rawPayload: payload,
                         },
@@ -588,6 +605,9 @@ router.post(['/webhook', '/webhooks/meta', '/debug/mock-whatsapp/incoming'], asy
         console.error('Error processing WhatsApp webhook:', error);
         res.status(500).json({ error: 'Internal server error while processing webhook' });
     }
-});
+}
+
+router.post(['/webhook', '/webhooks/meta'], processIncomingWebhook);
+router.post('/debug/mock-whatsapp/incoming', authMiddleware, requireWhatsAppAdmin, processIncomingWebhook);
 
 export default router;

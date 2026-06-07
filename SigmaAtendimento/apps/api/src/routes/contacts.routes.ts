@@ -10,7 +10,10 @@ router.use(authMiddleware); // tenancy (ADR-02)
 router.get('/', async (req, res) => {
     try {
         const query = req.query.query as string;
+        const customerId = req.query.customerId as string | undefined;
+        const take = Math.max(1, Math.min(Number(req.query.take || 100), 500));
         const where: any = { ...companyScope(req) };
+        if (customerId) where.customerId = customerId;
         if (query) {
             where.OR = [
                 { name: { contains: query, mode: 'insensitive' } },
@@ -22,7 +25,7 @@ router.get('/', async (req, res) => {
             where,
             include: { customer: true },
             orderBy: { updatedAt: 'desc' },
-            take: 50,
+            take,
         });
         res.json(contacts);
     } catch (error: any) {
@@ -42,6 +45,7 @@ router.get('/:id', async (req, res) => {
             },
         });
         if (!contact) return res.status(404).json({ error: 'Contact not found' });
+        const normalizedPhone = contact.phone.replace(/\D/g, '');
         res.json(contact);
     } catch (error: any) {
         res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to fetch contact' });
@@ -53,8 +57,15 @@ router.post('/', async (req, res) => {
     try {
         const { name, phone, email, role, notes, customerId } = req.body ?? {};
         if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+        const scope = companyScope(req);
+        if (customerId) {
+            const customer = await prisma.customer.findFirst({ where: { id: customerId, ...scope }, select: { id: true } });
+            if (!customer) return res.status(404).json({ error: 'Customer not found' });
+        }
+        const existing = await prisma.contact.findFirst({ where: { phone, ...scope }, select: { id: true } });
+        if (existing) return res.status(409).json({ error: 'Telefone já cadastrado nesta empresa' });
         const contact = await prisma.contact.create({
-            data: { ...companyScope(req), name, phone, email, role, notes, customerId: customerId ?? undefined },
+            data: { ...scope, name, phone, email, role, notes, customerId: customerId ?? undefined },
         });
         res.status(201).json(contact);
     } catch (error: any) {
@@ -66,12 +77,17 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
     try {
         const { name, email, notes, role, customerId } = req.body ?? {};
+        const scope = companyScope(req);
+        if (customerId) {
+            const customer = await prisma.customer.findFirst({ where: { id: customerId, ...scope }, select: { id: true } });
+            if (!customer) return res.status(404).json({ error: 'Customer not found' });
+        }
         const result = await prisma.contact.updateMany({
-            where: { id: req.params.id, ...companyScope(req) },
+            where: { id: req.params.id, ...scope },
             data: { name, email, notes, role, customerId },
         });
         if (result.count === 0) return res.status(404).json({ error: 'Contact not found' });
-        const contact = await prisma.contact.findFirst({ where: { id: req.params.id, ...companyScope(req) } });
+        const contact = await prisma.contact.findFirst({ where: { id: req.params.id, ...scope } });
         res.json(contact);
     } catch (error: any) {
         res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to update contact' });
@@ -91,6 +107,7 @@ router.delete('/:id/data', async (req, res) => {
         });
 
         if (!contact) return res.status(404).json({ error: 'Contact not found' });
+        const normalizedPhone = contact.phone.replace(/\D/g, '');
 
         const conversationIds = (await prisma.conversation.findMany({
             where: { contactId: contact.id, ...companyScope(req) },
@@ -118,10 +135,10 @@ router.delete('/:id/data', async (req, res) => {
                 : { count: 0 };
             const conversations = await tx.conversation.deleteMany({ where: { contactId: contact.id, ...companyScope(req) } });
             const inboundEvents = await tx.whatsAppInboundEvent.deleteMany({
-                where: { companyId: contact.companyId, fromPhone: contact.phone },
+                where: { companyId: contact.companyId, fromPhone: { in: [contact.phone, normalizedPhone] } },
             });
             const outbox = await tx.whatsAppOutbox.deleteMany({
-                where: { companyId: contact.companyId, toPhone: contact.phone.replace(/\D/g, '') },
+                where: { companyId: contact.companyId, toPhone: normalizedPhone },
             });
             const contacts = await tx.contact.deleteMany({ where: { id: contact.id, ...companyScope(req) } });
 

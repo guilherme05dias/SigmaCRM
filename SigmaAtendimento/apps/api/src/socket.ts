@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
 import type { AuthPayload } from './middlewares/auth.middleware';
+import { prisma } from './lib/prisma';
 
 let io: Server;
 const JWT_SECRET = process.env.JWT_SECRET || 'sigma-secret-dev-key';
@@ -44,10 +45,16 @@ export const initSocket = (httpServer: HttpServer) => {
 
         console.log(`Socket connected: User ${payload.id} (${socket.id})`);
 
-        socket.on('conversation:join', ({ conversationId }) => {
-            if (conversationId) {
+        socket.on('conversation:join', async ({ conversationId }) => {
+            if (!conversationId || !socket.data.companyId) return;
+
+            const conversation = await prisma.conversation.findFirst({
+                where: { id: conversationId, companyId: socket.data.companyId },
+                select: { id: true },
+            });
+
+            if (conversation) {
                 socket.join(`conversation:${conversationId}`);
-                // console.log(`Socket ${socket.id} joined conversation:${conversationId}`);
             }
         });
 

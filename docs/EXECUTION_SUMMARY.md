@@ -1,6 +1,6 @@
 # Sigma — Resumo de Execução, Decisões e Próximos Passos
 
-**Atualizado:** 2026-06-05
+**Atualizado:** 2026-06-07
 Documento-guia (handoff) que explica **tudo o que foi feito**, **por que foi feito
 assim** e **qual o próximo passo**. Para detalhes, ver os documentos referenciados.
 
@@ -9,6 +9,13 @@ Mapa de documentos:
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) ·
 [M2_NOTES.md](M2_NOTES.md) · [M3_NOTES.md](M3_NOTES.md) · [M4_NOTES.md](M4_NOTES.md) ·
 [TEST_USERS.md](TEST_USERS.md) · [PRD.md](PRD.md) · [ROADMAP.md](ROADMAP.md)
+
+> **Nota de atualização:** este resumo preserva histórico da migração, mas o estado
+> operacional atual é o dos commits `80a2780`, `cf4de3c`, `42aa106` e correções de
+> 2026-06-07. Senhas usam `bcryptjs` com migração preguiçosa, socket broadcast é isolado
+> por empresa, WhatsApp tem outbox/idempotência preparada, LGPD tem rota + UI, e C7
+> adicionou toasts/skeletons/empty states. Pendências reais: teste WhatsApp com celular,
+> aplicar/validar RLS no Supabase, deploy público e validação mobile/manual.
 
 ---
 
@@ -80,9 +87,9 @@ Resumo na seção 4.
 | **`companyId` em tudo + escopo por código** | Multi-tenant é crítico desde o início; corrigir depois é caro/perigoso. RLS faseada (escreve no M2, ativa no M6). |
 | **camelCase** | Padrão idiomático do Prisma/TS; elimina a mistura snake/camel que existia. |
 | **WhatsApp: outbox + evento bruto + provider abstrato** | Evita perda de mensagem em falha; idempotência no webhook; troca WAHA→Meta sem dor. |
-| **Senha em texto puro mantida (dev)** | Não quebrar o login atual; **dívida registrada** para virar hash no M6. |
+| **Senha com `bcryptjs` + migração preguiçosa** | Logins legados continuam funcionando e são re-hasheados no próximo login; novos usuários/seed gravam hash. |
 | **Vertical slice antes de fan-out** | Provar um fluxo ponta-a-ponta (com 2 empresas) antes de construir todo o CRUD; evita arquitetura astronáutica. |
-| **Build validado antes do M4** | Após corrigir versionamento e aliases do monorepo, `prisma validate`, `npm run typecheck` e `npm run build` passaram localmente. Migration/seed no Supabase seguem pendentes. |
+| **Build/typecheck validados continuamente** | `prisma validate`, `npm run typecheck` e `npm run build` passaram localmente após C7 e correções de tenant. Migration/seed no Supabase seguem pendentes de ambiente. |
 
 ---
 
@@ -129,44 +136,34 @@ Resumo na seção 4.
 ## 5. Estado atual
 
 - **Backend**: domínio unificado (CRM + atendimento), multi-tenant, protocolo, máquina
-  de estados e CSAT — **escrito, migrado e compilando**. Em 2026-06-05, passaram
-  `prisma validate`, `prisma migrate deploy`, `prisma generate`, `npm run prisma:seed`,
-  `npm run typecheck` e `npm run build`.
-- **WhatsApp**: provider `murilo-api` adicionado para usar a cópia local de
-  `murilo1of1/whatsapp-api` em envio de mensagens, sessão, QR Code escaneável e
-  webhook de entrada via `client.on('message', ...)`. Falta teste real com celular
-  autenticando a sessão.
-- **Pendências não-bloqueantes**: auth do socket/conversations ainda usa token fake
-  (dívida pré-existente); `companyId` opcional no fluxo realtime; senha em texto puro.
-- **Frontend (`apps/web`)**: Dashboard e Clientes criados; navegação atualizada; telas
-  críticas passaram a usar `Authorization`. Falta teste visual completo, QR Code
-  WhatsApp no frontend e refinamento final de contratos compartilhados.
+  de estados, CSAT, hash de senha, socket por empresa, outbox/idempotência WhatsApp,
+  LGPD e RLS SQL preparado. Em 2026-06-07, passaram `prisma validate`, `npm run typecheck`
+  e `npm run build`.
+- **WhatsApp**: provider `murilo-api` preparado; conexão, QR Code, sync de histórico,
+  outbox/retry e webhook idempotente estão em código. Falta teste real com celular
+  autenticando a sessão e validando entrada/saída ponta-a-ponta.
+- **Frontend (`apps/web`)**: Dashboard, Inbox, Clientes, Tickets, Usuários,
+  Departamentos, Relatórios e Settings integrados; C7 adicionou toasts, skeletons,
+  empty states e acessibilidade básica. Falta validação visual/mobile manual.
+- **Pendências externas**: aplicar migrations no banco real/Supabase, validar RLS com
+  role sujeita a policy, configurar deploy público, domínio/CORS/webhook HTTPS e testar
+  WhatsApp real.
 
 ---
 
 ## 6. Próximo passo
 
 ### Imediato
-1. Rodar a API localmente:
-   ```powershell
-   cd SigmaAtendimento\apps\api
-   npm run dev
-   ```
-2. Testar login dev:
-   - `admin@dragonbyte.com` / `123456`
-   - `admin@acme.com` / `123456`
-3. Validar o slice multi-tenant:
-   - `GET /api/tickets` com token da DragonByte deve mostrar apenas dados da empresa A.
-   - `GET /api/tickets` com token da Acme deve mostrar apenas dados da empresa B.
+1. Aplicar migrations em banco local/staging.
+2. Subir API/Web e validar login.
+3. Conectar WhatsApp com celular real e testar: inbound → fila, boas-vindas, resposta
+   pela Inbox → chegada no celular.
+4. Validar RLS no Supabase com role sujeita às policies.
 
-### Depois (eu, como comandante)
-- **M4 (frontend unificado)**: testar visualmente com API/banco rodando, ligar QR Code
-  WhatsApp no frontend e refinar contratos compartilhados em camelCase.
-- **M5 (WhatsApp)**: testar sessão real com celular, persistir evento bruto em
-  `WhatsAppInboundEvent` (idempotência), implementar `WhatsAppOutbox` (retry),
-  roteamento por departamento, unificar auth do socket.
-- **M6 (produção)**: ativar RLS, hash de senha (bcrypt/argon2), LGPD, deploy
-  (Railway/Render + Supabase), monitoramento, Meta Cloud.
+### Depois
+- Deploy público com variáveis reais, CORS restrito e webhook HTTPS.
+- Política de retenção automática/configurável.
+- Validação mobile/manual e navegação por teclado profunda.
 
 ---
 

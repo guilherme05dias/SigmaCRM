@@ -60,12 +60,13 @@ router.post('/start', async (req: Request, res: Response) => {
         const checkedPhone = normalizePhone(checkedContact.phone || normalizedInput);
         const resolvedName = checkedContact.name || name || null;
 
-        let contact = await prisma.contact.findUnique({
-            where: { phone: checkedPhone },
+        let contact = await prisma.contact.findFirst({
+            where: { companyId, phone: checkedPhone },
         });
 
-        if (contact && contact.companyId && contact.companyId !== companyId) {
-            return res.status(409).json({ error: 'Este telefone já está vinculado a outra empresa.' });
+        if (departmentId) {
+            const department = await prisma.department.findFirst({ where: { id: departmentId, companyId }, select: { id: true } });
+            if (!department) return res.status(404).json({ error: 'Departamento não encontrado nesta empresa.' });
         }
 
         if (contact) {
@@ -233,10 +234,18 @@ router.post('/:id/transfer', async (req: Request, res: Response) => {
         const updateData: any = {};
 
         if (departmentId !== undefined) {
+            if (departmentId !== null) {
+                const department = await prisma.department.findFirst({ where: { id: departmentId, companyId }, select: { id: true } });
+                if (!department) return res.status(404).json({ error: 'Departamento não encontrado nesta empresa' });
+            }
             updateData.departmentId = departmentId;
         }
 
         if (assignedUserId !== undefined) {
+            if (assignedUserId !== null) {
+                const user = await prisma.user.findFirst({ where: { id: assignedUserId, companyId }, select: { id: true } });
+                if (!user) return res.status(404).json({ error: 'Usuário não encontrado nesta empresa' });
+            }
             updateData.assignedUserId = assignedUserId;
             // Se estou atribuindo diretamente a alguém, já está IN_PROGRESS. Se estou jogando pra fila nula, pode voltar a NEW
             if (assignedUserId === null && currentConversation.status === 'ASSIGNED') {

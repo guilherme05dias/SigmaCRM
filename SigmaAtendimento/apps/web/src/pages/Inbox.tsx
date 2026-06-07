@@ -207,11 +207,17 @@ export default function Inbox() {
         if (!selectedConvId || !body.trim()) return;
         setIsSubmitting(true);
         setSendError(null);
-        apiRequest(`/api/conversations/${selectedConvId}/messages`, {
+        apiRequest<Message>(`/api/conversations/${selectedConvId}/messages`, {
             method: 'POST',
             body: JSON.stringify({ body })
         })
-            .then(() => loadConversations())
+            .then((message) => {
+                setMessages(prev => {
+                    if (prev.find(m => m.id === message.id)) return prev;
+                    return [...prev, message];
+                });
+                loadConversations();
+            })
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
                     setSendError(err instanceof Error ? err.message : 'Erro ao enviar mensagem.');

@@ -79,6 +79,40 @@ function extractFieldService(data: Record<string, any>) {
     return { has, fs };
 }
 
+async function assertTenantReferences(companyId: string, refs: {
+    contactId?: string | null;
+    customerId?: string | null;
+    conversationId?: string | null;
+    departmentId?: string | null;
+    assignedUserId?: string | null;
+    technicianId?: string | null;
+}) {
+    if (refs.contactId) {
+        const contact = await prisma.contact.findFirst({ where: { id: refs.contactId, companyId }, select: { id: true } });
+        if (!contact) throw Object.assign(new Error('Contato não encontrado nesta empresa'), { status: 404 });
+    }
+    if (refs.customerId) {
+        const customer = await prisma.customer.findFirst({ where: { id: refs.customerId, companyId }, select: { id: true } });
+        if (!customer) throw Object.assign(new Error('Cliente não encontrado nesta empresa'), { status: 404 });
+    }
+    if (refs.conversationId) {
+        const conversation = await prisma.conversation.findFirst({ where: { id: refs.conversationId, companyId }, select: { id: true } });
+        if (!conversation) throw Object.assign(new Error('Conversa não encontrada nesta empresa'), { status: 404 });
+    }
+    if (refs.departmentId) {
+        const department = await prisma.department.findFirst({ where: { id: refs.departmentId, companyId }, select: { id: true } });
+        if (!department) throw Object.assign(new Error('Departamento não encontrado nesta empresa'), { status: 404 });
+    }
+    if (refs.assignedUserId) {
+        const user = await prisma.user.findFirst({ where: { id: refs.assignedUserId, companyId }, select: { id: true } });
+        if (!user) throw Object.assign(new Error('Usuário responsável não encontrado nesta empresa'), { status: 404 });
+    }
+    if (refs.technicianId) {
+        const technician = await prisma.user.findFirst({ where: { id: refs.technicianId, companyId }, select: { id: true } });
+        if (!technician) throw Object.assign(new Error('Técnico não encontrado nesta empresa'), { status: 404 });
+    }
+}
+
 // LISTAR (escopado por empresa)
 router.get('/', async (req, res) => {
     try {
@@ -126,6 +160,14 @@ router.post('/', async (req, res) => {
         }
         const { contactId, customerId, conversationId, title, description, category, channel, priority, departmentId, assignedUserId, notesInternal } = parsed.data;
         const { has: hasFS, fs } = extractFieldService(parsed.data);
+        await assertTenantReferences(companyId, {
+            contactId,
+            customerId,
+            conversationId,
+            departmentId,
+            assignedUserId,
+            technicianId: parsed.data.technicianId,
+        });
 
         const ticket = await prisma.$transaction(async (tx) => {
             const protocol = await generateProtocol(companyId, tx);
@@ -177,6 +219,11 @@ router.patch('/:id', async (req, res) => {
 
         const { status, priority, assignedUserId, departmentId, title, description, category, notesInternal } = parsed.data;
         const { has: hasFS, fs } = extractFieldService(parsed.data);
+        await assertTenantReferences(companyId, {
+            departmentId,
+            assignedUserId,
+            technicianId: parsed.data.technicianId,
+        });
 
         const data: any = {};
         if (status && status !== existing.status) {

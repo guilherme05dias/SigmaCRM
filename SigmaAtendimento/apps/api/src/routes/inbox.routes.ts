@@ -53,8 +53,9 @@ router.use(authMiddleware);
 router.get('/conversations', async (req, res) => {
     try {
         const { status, assignedUserId, departmentId } = req.query;
+        const companyId = getCompanyId(req);
 
-        const where: any = {};
+        const where: any = { companyId };
         if (status) where.status = status;
         if (assignedUserId) {
             where.assignedUserId = assignedUserId === 'unassigned' ? null : assignedUserId;
@@ -85,15 +86,22 @@ router.get('/conversations', async (req, res) => {
 // List ALL messages of a specific conversation
 router.get('/conversations/:id/messages', async (req, res) => {
     try {
+        const companyId = getCompanyId(req);
         const parsed = GetMessagesSchema.safeParse(req.query);
         if (!parsed.success) {
             return res.status(400).json({ error: 'Parâmetros inválidos', details: parsed.error.issues });
         }
         const { take, cursor } = parsed.data;
 
+        const conversation = await prisma.conversation.findFirst({
+            where: { id: req.params.id, companyId },
+            select: { id: true },
+        });
+        if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
+
         const messages = await prisma.message.findMany({
             take: take + 1, // fetch one more to check if there is a next page
-            where: { conversationId: req.params.id },
+            where: { conversationId: req.params.id, companyId },
             ...(cursor && { skip: 1, cursor: { id: cursor } }),
             orderBy: { createdAt: 'desc' }, // Order descending to get the latest messages
             include: {
@@ -126,14 +134,17 @@ router.get('/conversations/:id/messages', async (req, res) => {
 // Take conversation (Assign to user)
 router.post('/conversations/:id/take', async (req, res) => {
     try {
+        const companyId = getCompanyId(req);
         const parsed = TakeConversationSchema.safeParse(req.body);
         if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos', details: parsed.error.issues });
         const { userId } = parsed.data;
 
-        const currentConversation = await prisma.conversation.findUnique({ where: { id: req.params.id } });
+        const currentConversation = await prisma.conversation.findFirst({ where: { id: req.params.id, companyId } });
         if (!currentConversation) {
             return res.status(404).json({ error: 'Conversation not found' });
         }
+        const user = await prisma.user.findFirst({ where: { id: userId, companyId }, select: { id: true } });
+        if (!user) return res.status(404).json({ error: 'Usuário não encontrado nesta empresa' });
 
         const dataToUpdate: any = {
             assignedUserId: userId,
@@ -160,9 +171,25 @@ router.post('/conversations/:id/take', async (req, res) => {
 // Transfer conversation
 router.post('/conversations/:id/transfer', async (req, res) => {
     try {
+        const companyId = getCompanyId(req);
         const parsed = TransferConversationSchema.safeParse(req.body);
         if (!parsed.success) return res.status(400).json({ error: 'Dados inválidos', details: parsed.error.issues });
         const { userId, departmentId } = parsed.data;
+        const currentConversation = await prisma.conversation.findFirst({
+            where: { id: req.params.id, companyId },
+            select: { id: true },
+        });
+        if (!currentConversation) {
+            return res.status(404).json({ error: 'Conversation not found' });
+        }
+        if (userId) {
+            const user = await prisma.user.findFirst({ where: { id: userId, companyId }, select: { id: true } });
+            if (!user) return res.status(404).json({ error: 'Usuário não encontrado nesta empresa' });
+        }
+        if (departmentId) {
+            const department = await prisma.department.findFirst({ where: { id: departmentId, companyId }, select: { id: true } });
+            if (!department) return res.status(404).json({ error: 'Departamento não encontrado nesta empresa' });
+        }
         const data: any = {};
         if (userId !== undefined) data.assignedUserId = userId;
         if (departmentId !== undefined) data.departmentId = departmentId;
@@ -348,8 +375,8 @@ router.post('/conversations/:id/tickets', async (req, res) => {
             technicianId, notesInternal
         } = parsed.data;
 
-        const conversation = await prisma.conversation.findUnique({
-            where: { id: conversationId }
+        const conversation = await prisma.conversation.findFirst({
+            where: { id: conversationId, companyId }
         });
 
         if (!conversation || conversation.companyId !== companyId) {
@@ -357,6 +384,14 @@ router.post('/conversations/:id/tickets', async (req, res) => {
         }
 
         const hasFieldService = !!(technicianId || visitAddress || visitWindowStart || visitWindowEnd || equipment || serviceType);
+        if (customerId) {
+            const customer = await prisma.customer.findFirst({ where: { id: customerId, companyId }, select: { id: true } });
+            if (!customer) return res.status(404).json({ error: 'Cliente não encontrado nesta empresa' });
+        }
+        if (technicianId) {
+            const technician = await prisma.user.findFirst({ where: { id: technicianId, companyId }, select: { id: true } });
+            if (!technician) return res.status(404).json({ error: 'Técnico não encontrado nesta empresa' });
+        }
 
         const ticket = await prisma.$transaction(async (tx) => {
             const protocol = await generateProtocol(companyId, tx);

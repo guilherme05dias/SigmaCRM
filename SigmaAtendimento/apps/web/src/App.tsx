@@ -11,6 +11,7 @@ import TicketDetail from './pages/TicketDetail';
 import Reports from './pages/Reports';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
+import NotFound from './pages/NotFound';
 import { useEffect, useState } from 'react';
 import { clearAuthToken, getAuthToken } from './lib/authToken';
 import { AuthProvider } from './lib/auth';
@@ -86,6 +87,7 @@ function App() {
             <Route path="/settings" element={<ProtectedLayout><Settings /></ProtectedLayout>} />
             <Route path="/politica-de-privacidade" element={<PrivacyPolicy />} />
             <Route path="/termos-de-servico" element={<TermsOfService />} />
+            <Route path="*" element={<ProtectedLayout><NotFound /></ProtectedLayout>} />
         </Routes>
     );
 }

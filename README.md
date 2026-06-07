@@ -1,64 +1,45 @@
 # SigmaCRM
 
-Workspace organizado como monorepo para separar as camadas do sistema SigmaCRM.
+Workspace do produto **Sigma Atendimento + CRM**.
 
-## Estrutura
+O produto ativo fica em [`SigmaAtendimento`](SigmaAtendimento/), um monorepo npm com:
 
-```text
-frontend/
-  web/        Next.js App Router, TypeScript e Supabase
-  streamlit/  Aplicacao Streamlit legada/operacional
-backend/
-  whatsapp-bridge/  Bridge Node.js para captura WhatsApp
-database/
-  supabase/   Schema e migrations PostgreSQL/Supabase
-  data/       Arquivos de dados usados em migracoes
-docs/         PRD, roadmap, design system e setup
-```
+- `apps/api`: API Express + Prisma + Postgres/Supabase + Socket.io + JWT.
+- `apps/web`: React 18 + Vite + Tailwind + React Router.
+- `apps/whatsapp-api`: API WhatsApp local baseada em `murilo1of1/whatsapp-api`, quando presente.
+- `packages/shared`: contratos/tipos compartilhados.
 
-## Documentacao
+As pastas antigas `frontend/`, `backend/` e `database/` são legado/histórico da migração do CRM Streamlit e não representam mais a arquitetura principal.
 
-- [Arquitetura](docs/ARCHITECTURE.md)
-- [Setup local](docs/SETUP.md)
-- [Roadmap](docs/ROADMAP.md)
-- [PRD](docs/PRD.md)
-
-## Comandos Principais
-
-Web:
+## Começo Rápido
 
 ```powershell
-cd frontend\web
+cd SigmaAtendimento
 npm install
+copy .env.example .env
+npm run prisma:generate --workspace=@sigma/api
+npm run prisma:migrate --workspace=@sigma/api
 npm run dev
 ```
 
-Streamlit:
+Web: `http://localhost:5173`
+API: `http://localhost:3334`
+
+## Documentação Principal
+
+- [Plano de ação](docs/ACTION_PLAN.md)
+- [Resumo de execução](docs/EXECUTION_SUMMARY.md)
+- [Deploy e ambiente](docs/DEPLOYMENT.md)
+- [Decisões de arquitetura](docs/ARCHITECTURE_DECISIONS.md)
+
+## Validação
 
 ```powershell
-cd frontend\streamlit
-pip install -r requirements.txt
-streamlit run main.py
+cd SigmaAtendimento
+npm run typecheck
+npm run build
 ```
 
-Bridge WhatsApp:
+## Segurança
 
-```powershell
-cd backend\whatsapp-bridge
-npm install
-npm start
-```
-
-## Banco de Dados
-
-As migrations Supabase ficam em `database/supabase/migrations/`.
-
-Para aplicar o schema e migrar dados locais, configure `frontend/streamlit/.streamlit/secrets.toml` e execute:
-
-```powershell
-python frontend\streamlit\migrate_to_supabase.py
-```
-
-## Segredos e Artefatos Locais
-
-Nao versionar `.env`, `.env.local`, `.streamlit/secrets.toml`, bancos SQLite locais, logs, caches, `node_modules/`, `.next/` ou sessoes do WhatsApp Web.
+Não versionar `.env`, chaves Supabase, tokens Meta/WhatsApp, sessões do WhatsApp, bancos locais, logs, `node_modules/` ou `dist/`.

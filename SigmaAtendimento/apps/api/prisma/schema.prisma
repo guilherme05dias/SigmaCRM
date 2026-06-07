@@ -190,7 +190,7 @@ model Contact {
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
   name       String?
-  phone      String    @unique
+  phone      String
   email      String?
   role       String?
   notes      String?
@@ -201,6 +201,7 @@ model Contact {
   tickets       Ticket[]
 
   @@index([companyId])
+  @@unique([companyId, phone])
 }
 
 // ─────────────────────────────── ATENDIMENTO ───────────────────────────────
