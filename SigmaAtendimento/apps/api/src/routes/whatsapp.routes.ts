@@ -210,6 +210,32 @@ router.post('/sessions/:sessionId/sync-history', authMiddleware, requireWhatsApp
             for (const [index, message] of sortedMessages.entries()) {
                 const waMessageId = message.waMessageId || `history_${phone}_${message.timestamp || index}_${message.direction}`;
                 if (existingMessageIds.has(waMessageId)) continue;
+                const messageCreatedAt = fromWhatsAppTimestamp(message.timestamp);
+
+                if (message.direction === 'OUTBOUND' && message.body && messageCreatedAt) {
+                    const closeFrom = new Date(messageCreatedAt.getTime() - 5 * 60 * 1000);
+                    const closeTo = new Date(messageCreatedAt.getTime() + 5 * 60 * 1000);
+                    const localOutbound = await prisma.message.findFirst({
+                        where: {
+                            companyId,
+                            conversationId: conversation.id,
+                            direction: 'OUTBOUND',
+                            body: message.body,
+                            waMessageId: { startsWith: 'murilo_' },
+                            createdAt: { gte: closeFrom, lte: closeTo },
+                        },
+                        orderBy: { createdAt: 'desc' },
+                    });
+
+                    if (localOutbound) {
+                        await prisma.message.update({
+                            where: { id: localOutbound.id },
+                            data: { waMessageId },
+                        });
+                        existingMessageIds.add(waMessageId);
+                        continue;
+                    }
+                }
 
                 await prisma.message.create({
                     data: {
@@ -220,7 +246,7 @@ router.post('/sessions/:sessionId/sync-history', authMiddleware, requireWhatsApp
                         body: message.body || null,
                         mediaUrl: message.mediaUrl || null,
                         waMessageId,
-                        createdAt: fromWhatsAppTimestamp(message.timestamp) || undefined,
+                        createdAt: messageCreatedAt || undefined,
                     },
                 });
                 importedMessages += 1;

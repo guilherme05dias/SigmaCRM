@@ -9,8 +9,11 @@ import {
 
 type SendMessageResponse = {
     message?: string;
+    messageId?: string;
+    id?: string;
     status?: string;
     error?: string;
+    wid?: string;
 };
 
 type SessionResponse = {
@@ -127,7 +130,7 @@ export class MuriloWhatsAppApiProvider implements IWhatsAppProvider {
             mensagem: params.body,
         });
 
-        return { waMessageId: `murilo_text_${Date.now()}_${response.status || "sent"}` };
+        return { waMessageId: response.messageId || response.id || `murilo_text_${Date.now()}_${response.status || "sent"}` };
     }
 
     async sendMedia(params: {
@@ -149,7 +152,7 @@ export class MuriloWhatsAppApiProvider implements IWhatsAppProvider {
             mensagem: params.caption,
         });
 
-        return { waMessageId: `murilo_doc_${Date.now()}_${response.status || "sent"}` };
+        return { waMessageId: response.messageId || response.id || `murilo_doc_${Date.now()}_${response.status || "sent"}` };
     }
 
     async parseIncoming(payload: any): Promise<ParsedIncomingPayload> {

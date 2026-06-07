@@ -17,9 +17,46 @@ app.use(require('cors')());
 
 
 const sessionsDir = path.join(__dirname, 'sessions'); // Diretório onde as sessões estão armazenadas
+const widPhoneMapPath = path.join(sessionsDir, 'wid-phone-map.json');
 let sessions = {}; // Armazena as sessões ativas e os QR Codes
 const forwardedIncomingMessageIds = new Set();
 const widPhoneMap = new Map();
+
+function ensureSessionsDir() {
+    if (!fs.existsSync(sessionsDir)) {
+        fs.mkdirSync(sessionsDir, { recursive: true });
+    }
+}
+
+function loadWidPhoneMap() {
+    ensureSessionsDir();
+    if (!fs.existsSync(widPhoneMapPath)) return;
+
+    try {
+        const raw = fs.readFileSync(widPhoneMapPath, 'utf8');
+        const entries = JSON.parse(raw);
+        if (Array.isArray(entries)) {
+            entries.forEach(([wid, phone]) => {
+                if (wid && phone) widPhoneMap.set(wid, phone);
+            });
+        }
+    } catch (error) {
+        console.warn('Não foi possível carregar mapa wid->telefone:', error.message);
+    }
+}
+
+function rememberWidPhone(wid, phone) {
+    const normalizedPhone = String(phone || '').replace(/\D/g, '');
+    if (!wid || normalizedPhone.length < 10) return;
+
+    widPhoneMap.set(wid, normalizedPhone);
+    try {
+        ensureSessionsDir();
+        fs.writeFileSync(widPhoneMapPath, JSON.stringify([...widPhoneMap.entries()], null, 2));
+    } catch (error) {
+        console.warn('Não foi possível persistir mapa wid->telefone:', error.message);
+    }
+}
 
 function getSessionStatus(client) {
     if (!client) return 'NOT_FOUND';
@@ -54,6 +91,21 @@ function mapMessageType(type) {
     return 'TEXT';
 }
 
+function isDirectChat(chat) {
+    const serializedId = chat.id?._serialized || '';
+    if (!serializedId || chat.isGroup) return false;
+    if (serializedId.includes('@broadcast') || serializedId.includes('status@broadcast')) return false;
+    return serializedId.endsWith('@c.us') || serializedId.endsWith('@lid');
+}
+
+function resolveContactPhone(contact, chat) {
+    const contactWid = contact?.id?._serialized || '';
+    const chatWid = chat?.id?._serialized || '';
+    const mappedPhone = widPhoneMap.get(chatWid) || widPhoneMap.get(contactWid);
+    const rawPhone = mappedPhone || contact?.number || contact?.id?.user || chat?.id?.user || '';
+    return String(rawPhone).replace(/\D/g, '');
+}
+
 async function notifySigmaHistorySync(sessionId) {
     try {
         const response = await fetch(`${sigmaWhatsAppBaseUrl}/sessions/${encodeURIComponent(sessionId)}/sync-history`, {
@@ -81,7 +133,7 @@ async function forwardIncomingMessageToSigma(sessionId, message) {
     try {
         const contact = await message.getContact();
         const wid = contact.id?._serialized || message.from;
-        const contactPhone = String(widPhoneMap.get(wid) || contact.number || contact.id?.user || message.from || '').replace(/\D/g, '');
+        const contactPhone = String(widPhoneMap.get(message.from) || widPhoneMap.get(wid) || contact.number || contact.id?.user || message.from || '').replace(/\D/g, '');
         const payload = {
             provider: 'murilo-api',
             sessionId,
@@ -157,14 +209,18 @@ function createClient(sessionId) {
 // Carrega sessões existentes ao iniciar o servidor
 function loadExistingSessions() {
     if (fs.existsSync(sessionsDir)) {
-        const sessionFiles = fs.readdirSync(sessionsDir);
-        sessionFiles.forEach((file) => {
-            const sessionId = path.parse(file).name.split('-')[1];
-        const client = createClient(sessionId);
-        sessions[sessionId] = client;
-        sessions[sessionId].status = 'STARTING';
-    });
-}
+        const sessionFiles = fs.readdirSync(sessionsDir, { withFileTypes: true });
+        sessionFiles
+            .filter((file) => file.isDirectory() && file.name.startsWith('session-'))
+            .forEach((file) => {
+                const sessionId = file.name.replace(/^session-/, '');
+                if (!sessionId) return;
+
+                const client = createClient(sessionId);
+                sessions[sessionId] = client;
+                sessions[sessionId].status = 'STARTING';
+            });
+    }
 }
 
 // Endpoint para iniciar uma sessão
@@ -203,10 +259,7 @@ app.get('/history/:sessionId', async (req, res) => {
     try {
         const chats = await client.getChats();
         const directChats = chats
-            .filter((chat) => {
-                const serializedId = chat.id?._serialized || '';
-                return !chat.isGroup && serializedId.endsWith('@c.us') && !serializedId.includes('@broadcast');
-            })
+            .filter(isDirectChat)
             .sort((a, b) => {
                 const aTime = a.timestamp || a.lastMessage?.timestamp || 0;
                 const bTime = b.timestamp || b.lastMessage?.timestamp || 0;
@@ -218,8 +271,10 @@ app.get('/history/:sessionId', async (req, res) => {
 
         for (const chat of directChats) {
             const contact = await chat.getContact();
-            const phone = (contact.id?.user || chat.id?.user || '').replace(/\D/g, '');
+            const phone = resolveContactPhone(contact, chat);
             if (phone.length < 10) continue;
+            if (contact.id?._serialized) rememberWidPhone(contact.id._serialized, phone);
+            if (chat.id?._serialized) rememberWidPhone(chat.id._serialized, phone);
 
             const messages = await chat.fetchMessages({ limit: messageLimit });
 
@@ -318,7 +373,7 @@ app.post('/check-number/:sessionId', async (req, res) => {
             wid: numberId._serialized,
             name,
         });
-        widPhoneMap.set(numberId._serialized, normalizedPhone);
+        rememberWidPhone(numberId._serialized, normalizedPhone);
     } catch (error) {
         console.error(`Erro ao validar número ${normalizedPhone}:`, error);
         res.status(500).json({ message: 'Erro ao validar número no WhatsApp.', error: error.message, exists: false });
@@ -391,22 +446,24 @@ app.post('/send-message/:sessionId', async (req, res) => {
         }
 
         const destinationId = numberId._serialized;
-        widPhoneMap.set(destinationId, normalizedPhone);
+        rememberWidPhone(destinationId, normalizedPhone);
 
+        let sentMessage;
         if (arquivoBase64 && nomeArquivo) {
             // Criar a mídia com o nome do arquivo
             const media = new MessageMedia('application/pdf', arquivoBase64, nomeArquivo);
 
             // Enviar o arquivo sem legenda
-            await client.sendMessage(destinationId, media);
+            sentMessage = await client.sendMessage(destinationId, media);
         } else if (mensagem) {
             // Enviar apenas a mensagem de texto
-            await client.sendMessage(destinationId, mensagem);
+            sentMessage = await client.sendMessage(destinationId, mensagem);
         } else {
             return res.status(400).json({ message: "Nenhuma mensagem ou arquivo enviado." });
         }
 
-        res.status(200).json({ message: 'Mensagem enviada com sucesso!', wid: destinationId });
+        const messageId = typeof sentMessage?.id === 'object' ? sentMessage.id.id : sentMessage?.id;
+        res.status(200).json({ message: 'Mensagem enviada com sucesso!', wid: destinationId, messageId });
     } catch (error) {
         console.error('Erro ao enviar mensagem:', error);
         res.status(500).json({ message: 'Erro ao enviar mensagem.', error: error.message });
@@ -448,5 +505,6 @@ app.get('/get-qrcode-image/:sessionId', async (req, res) => {
 app.listen(port, () => {
     console.log(`API rodando na porta ${port}`);
     console.log(`Webhook Sigma: ${sigmaWebhookUrl}`);
+    loadWidPhoneMap();
     loadExistingSessions();
 });

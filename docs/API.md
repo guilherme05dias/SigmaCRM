@@ -307,6 +307,10 @@ Envio local:
 A API local chama `client.getNumberId()` antes de enviar. Isso e necessario para
 suportar contatos que o WhatsApp Web identifica como `@lid`.
 
+Quando um `@lid` e resolvido para um telefone real, a API local persiste o mapa em
+`apps/whatsapp-api/src/sessions/wid-phone-map.json` (diretorio ignorado pelo Git).
+Esse mapa evita duplicar contatos no Sigma apos reinicios da API WhatsApp.
+
 ## Socket.io
 
 O frontend conecta na API com JWT e entra em salas por empresa/conversa.
