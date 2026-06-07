@@ -66,3 +66,8 @@ Depois, conecte o WhatsApp pela tela **Configurações > Integração WhatsApp**
 ## Produção
 
 Consulte [../docs/DEPLOYMENT.md](../docs/DEPLOYMENT.md).
+
+## API
+
+Referencia de endpoints, autenticação, WhatsApp e Socket.io:
+[../docs/API.md](../docs/API.md).

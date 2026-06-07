@@ -3,6 +3,7 @@
 **Data:** 2026-06-07
 **Fonte principal:** [ACTION_PLAN.md](ACTION_PLAN.md)
 **Resumo executivo:** [EXECUTION_SUMMARY.md](EXECUTION_SUMMARY.md)
+**Referencia da API:** [API.md](API.md)
 
 Este arquivo é o handoff atual para continuar o projeto sem refazer trabalho já
 executado. Ele substitui os prompts antigos das ondas A/B/C.
@@ -88,7 +89,8 @@ npm install
 npm run dev
 npm run typecheck
 npm run build
-npx prisma migrate deploy --schema=apps/api/prisma/schema.prisma
+cd apps\api
+npx prisma migrate deploy --schema=prisma/schema.prisma
 ```
 
 Portas locais:
@@ -103,10 +105,16 @@ Portas locais:
 - `JWT_SECRET`
 - `CORS_ORIGIN`
 - `WHATSAPP_PROVIDER=mock|murilo-api|meta-cloud`
-- `WHATSAPP_API_URL`
-- `WHATSAPP_API_TOKEN`
-- `WHATSAPP_SESSION_ID`
-- `WHATSAPP_WEBHOOK_SECRET`
+- `MURILO_WHATSAPP_API_BASE_URL`
+- `MURILO_WHATSAPP_DEFAULT_SESSION_ID`
+- `WHATSAPP_API_PORT`
+- `SIGMA_WEBHOOK_URL`
+- `SIGMA_WHATSAPP_BASE_URL`
+- `CHROME_EXECUTABLE_PATH`
+- `META_WHATSAPP_API_BASE_URL`
+- `META_WHATSAPP_PHONE_NUMBER_ID`
+- `META_WHATSAPP_ACCESS_TOKEN`
+- `META_WHATSAPP_VERIFY_TOKEN`
 
 ## Regra para proximos agentes
 

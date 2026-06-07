@@ -29,6 +29,7 @@ API: `http://localhost:3334`
 
 - [Plano de ação](docs/ACTION_PLAN.md)
 - [Resumo de execução](docs/EXECUTION_SUMMARY.md)
+- [Referência da API](docs/API.md)
 - [Deploy e ambiente](docs/DEPLOYMENT.md)
 - [Decisões de arquitetura](docs/ARCHITECTURE_DECISIONS.md)
 

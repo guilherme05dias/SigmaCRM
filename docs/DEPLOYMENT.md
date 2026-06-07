@@ -2,6 +2,8 @@
 
 Este guia prepara o deploy do monorepo `SigmaAtendimento` sem executar deploy real. Ele cobre variaveis, ordem de build, banco Supabase/Postgres, RLS e WhatsApp.
 
+Referencia de endpoints da API: [API.md](API.md).
+
 ## Escopo
 
 - API: `SigmaAtendimento/apps/api`
@@ -79,10 +81,17 @@ Gere o client Prisma:
 npm run prisma:generate --workspace=@sigma/api
 ```
 
-Aplique migrations:
+Aplique migrations em desenvolvimento local:
 
 ```powershell
 npm run prisma:migrate --workspace=@sigma/api
+```
+
+Em servidor/producao, use `migrate deploy` a partir de `apps/api`:
+
+```powershell
+cd SigmaAtendimento\apps\api
+npx prisma migrate deploy --schema=prisma/schema.prisma
 ```
 
 Seed opcional para ambiente de teste:
@@ -140,7 +149,10 @@ A API deve responder em:
 GET http://localhost:3334/health
 ```
 
-Se `PORT` for alterado, atualize tambem `VITE_API_URL`, `VITE_SOCKET_URL`, `CORS_ORIGIN`, `SIGMA_WEBHOOK_URL` e `SIGMA_WHATSAPP_BASE_URL`.
+O `.env.example` usa `PORT=3334`. O codigo tem fallback interno para `3333` se
+`PORT` nao existir; por isso, configure `PORT` explicitamente. Se `PORT` for
+alterado, atualize tambem `VITE_API_URL`, `VITE_SOCKET_URL`, `CORS_ORIGIN`,
+`SIGMA_WEBHOOK_URL` e `SIGMA_WHATSAPP_BASE_URL`.
 
 ## Configuracao do Frontend
 
@@ -176,6 +188,13 @@ SIGMA_WEBHOOK_URL=https://api.seu-dominio.com/api/whatsapp/webhook
 
 Se a API WhatsApp estiver fora da mesma rede, a URL da API Sigma precisa ser publica e acessivel por HTTPS. Conversas antigas e contatos so serao sincronizados depois da sessao estar conectada e do endpoint de sincronizacao ser acionado.
 
+As rotas operacionais de WhatsApp no Sigma exigem JWT de `ADMIN` ou `SUPERVISOR`.
+Os webhooks `/api/whatsapp/webhook` e `/api/whatsapp/webhooks/meta` sao publicos
+por necessidade de integracao externa.
+
+Com `murilo-api`, a API WhatsApp local resolve o destino com `client.getNumberId()`
+antes de enviar. Isso suporta contatos retornados pelo WhatsApp Web como `@lid`.
+
 ## Checklist Antes de Produzir
 
 - `.env` preenchido fora do Git.
@@ -183,6 +202,9 @@ Se a API WhatsApp estiver fora da mesma rede, a URL da API Sigma precisa ser pub
 - `JWT_SECRET` forte e diferente do ambiente local.
 - `CORS_ORIGIN` restrito ao dominio do frontend.
 - Migrations aplicadas.
+- Historico Prisma consistente; se uma coluna ja existir e a migration falhar, resolver
+  com `prisma migrate resolve` somente depois de confirmar que o efeito da migration
+  ja existe no banco.
 - RLS validado no Supabase.
 - `npm run typecheck` executado.
 - `npm run build` executado.
