@@ -9,6 +9,7 @@ import { metaCloudConfig } from '../whatsapp/config/metaCloud.config';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { getCompanyId } from '../lib/tenant';
 import { currentWhatsAppProvider, retryFailedOutbox, sendTextWithOutbox } from '../services/whatsappOutbox.service';
+import { verifyMetaSignature } from '../whatsapp/security/verifyMetaSignature';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -484,6 +485,16 @@ router.get(['/webhook', '/webhooks/meta'], (req: Request, res: ExpressResponse) 
 
 // Main Webhook endpoint for Meta Cloud API messages and events
 async function processIncomingWebhook(req: Request, res: ExpressResponse) {
+    // Só valida em provider real (meta-cloud). Mock/debug continuam livres.
+    if ((process.env.WHATSAPP_PROVIDER || 'mock') === 'meta-cloud') {
+        const rawBody = (req as any).rawBody as Buffer | undefined;
+        const signature = req.headers['x-hub-signature-256'] as string | undefined;
+        if (!rawBody || !verifyMetaSignature(rawBody, signature)) {
+            console.warn('[SIGMA] Webhook rejeitado: assinatura inválida.');
+            return res.status(401).json({ error: 'Invalid signature' });
+        }
+    }
+
     try {
         const payload = req.body;
         console.log('Received WhatsApp Webhook:', JSON.stringify(payload, null, 2));
