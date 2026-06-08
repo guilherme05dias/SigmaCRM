@@ -6,6 +6,7 @@ import { getIO, emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { companyScope, getCompanyId } from '../lib/tenant';
 import { sendTextWithOutbox } from '../services/whatsappOutbox.service';
+import { rateLimit } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -277,7 +278,7 @@ router.post('/:id/transfer', async (req: Request, res: Response) => {
     }
 });
 
-router.post('/:id/messages', async (req: Request, res: Response) => {
+router.post('/:id/messages', rateLimit(60_000, 60), async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
         const { body } = req.body;

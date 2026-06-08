@@ -6,6 +6,7 @@ import { getCompanyId } from '../lib/tenant';
 import { generateProtocol } from '../services/protocol.service';
 import { prisma } from '../lib/prisma';
 import { sendTextWithOutbox } from '../services/whatsappOutbox.service';
+import { rateLimit } from '../middlewares/rateLimit.middleware';
 import { z } from 'zod';
 
 const router = Router();
@@ -276,7 +277,7 @@ router.post('/conversations/:id/close', async (req, res) => {
 });
 
 // Send new message
-router.post('/conversations/:id/messages', async (req, res) => {
+router.post('/conversations/:id/messages', rateLimit(60_000, 60), async (req, res) => {
     try {
         const conversationId = req.params.id;
         const parsed = SendMessageSchema.safeParse(req.body);

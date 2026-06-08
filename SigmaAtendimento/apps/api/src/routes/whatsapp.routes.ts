@@ -10,6 +10,7 @@ import { authMiddleware } from '../middlewares/auth.middleware';
 import { getCompanyId } from '../lib/tenant';
 import { currentWhatsAppProvider, retryFailedOutbox, sendTextWithOutbox } from '../services/whatsappOutbox.service';
 import { verifyMetaSignature } from '../whatsapp/security/verifyMetaSignature';
+import { rateLimit } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -682,7 +683,7 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
     }
 }
 
-router.post(['/webhook', '/webhooks/meta'], processIncomingWebhook);
+router.post(['/webhook', '/webhooks/meta'], rateLimit(60_000, 300, () => 'webhook-global'), processIncomingWebhook);
 router.post('/debug/mock-whatsapp/incoming', authMiddleware, requireWhatsAppAdmin, processIncomingWebhook);
 
 // ─── Meta Cloud media proxy ───────────────────────────────────────────────────
