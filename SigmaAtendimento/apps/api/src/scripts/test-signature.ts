@@ -1,4 +1,4 @@
-import { verifyMetaSignature } from './src/whatsapp/security/verifyMetaSignature';
+import { verifyMetaSignature } from '../whatsapp/security/verifyMetaSignature';
 import crypto from 'crypto';
 
 process.env.META_APP_SECRET = 'test_secret';
