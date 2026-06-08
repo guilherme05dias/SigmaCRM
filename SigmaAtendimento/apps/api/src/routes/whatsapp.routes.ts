@@ -21,6 +21,15 @@ function requireWhatsAppAdmin(req: Request, res: ExpressResponse, next: NextFunc
     next();
 }
 
+function internalOrAdminAuth(req: Request, res: ExpressResponse, next: NextFunction) {
+    const internalToken = process.env.SIGMA_INTERNAL_TOKEN;
+    if (internalToken && req.headers['x-internal-token'] === internalToken) {
+        (req as any).isInternalServiceCall = true;
+        return next();
+    }
+    authMiddleware(req, res, () => requireWhatsAppAdmin(req, res, next));
+}
+
 async function getWebhookCompanyId(): Promise<string> {
     const configuredCompanyId = process.env.DEFAULT_COMPANY_ID || process.env.SIGMA_DEFAULT_COMPANY_ID;
 
@@ -117,9 +126,11 @@ router.post('/sessions/:sessionId/disconnect', authMiddleware, requireWhatsAppAd
     }
 });
 
-router.post('/sessions/:sessionId/sync-history', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req: Request, res: ExpressResponse) => {
     try {
-        const companyId = getCompanyId(req);
+        const companyId = (req as any).isInternalServiceCall
+            ? await getWebhookCompanyId()
+            : getCompanyId(req);
         const chatLimit = Math.max(1, Math.min(Number(req.body?.chatLimit || req.query.chatLimit || 100), 500));
         const messageLimit = Math.max(1, Math.min(Number(req.body?.messageLimit || req.query.messageLimit || 50), 200));
         const chats = await whatsappProvider.syncHistory({
@@ -507,12 +518,11 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
             });
         }
 
-        // Find or create Conversation
+        // Find or create Conversation — reopen closed ones instead of creating duplicates
         let conversation = await prisma.conversation.findFirst({
             where: {
                 companyId,
                 contactId: contact.id,
-                status: { in: ['OPEN', 'ASSIGNED'] },
             },
             orderBy: { createdAt: 'desc' },
         });
@@ -528,47 +538,75 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
                 },
             });
             isNewConversation = true;
+        } else if (conversation.status === 'CLOSED') {
+            conversation = await prisma.conversation.update({
+                where: { id: conversation.id },
+                data: { status: 'OPEN', closedAt: null, startedAt: new Date() },
+            });
+            isNewConversation = true;
         }
 
-        // Process Messages
+        // Process Messages (INBOUND and OUTBOUND from phone)
         for (const msg of parsed.messages) {
-            if (msg.direction === 'INBOUND') {
-                let inboundEvent;
-                try {
-                    inboundEvent = await prisma.whatsAppInboundEvent.create({
-                        data: {
-                            companyId,
-                            provider: currentWhatsAppProvider(),
-                            providerMessageId: msg.waMessageId || stableInboundMessageId(payload, phone, msg),
-                            fromPhone: phone,
-                            rawPayload: payload,
-                        },
-                    });
-                } catch (error: any) {
-                    if (error?.code === 'P2002') {
-                        continue;
-                    }
-                    throw error;
-                }
+            if (msg.direction === 'OUTBOUND') {
+                // Message sent from the phone (fromMe) — deduplicate by waMessageId
+                if (!msg.waMessageId) continue;
+                const existing = await prisma.message.findFirst({
+                    where: { companyId, conversationId: conversation.id, waMessageId: msg.waMessageId },
+                });
+                if (existing) continue;
 
                 const message = await prisma.message.create({
                     data: {
                         companyId,
                         conversationId: conversation.id,
-                        direction: 'INBOUND',
+                        direction: 'OUTBOUND',
                         type: msg.type,
                         body: msg.body,
                         mediaUrl: msg.mediaUrl,
                         waMessageId: msg.waMessageId,
                     },
                 });
-
                 getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
-                await prisma.whatsAppInboundEvent.update({
-                    where: { id: inboundEvent.id },
-                    data: { processedAt: new Date() },
-                });
+                continue;
             }
+
+            // INBOUND
+            let inboundEvent;
+            try {
+                inboundEvent = await prisma.whatsAppInboundEvent.create({
+                    data: {
+                        companyId,
+                        provider: currentWhatsAppProvider(),
+                        providerMessageId: msg.waMessageId || stableInboundMessageId(payload, phone, msg),
+                        fromPhone: phone,
+                        rawPayload: payload,
+                    },
+                });
+            } catch (error: any) {
+                if (error?.code === 'P2002') {
+                    continue;
+                }
+                throw error;
+            }
+
+            const message = await prisma.message.create({
+                data: {
+                    companyId,
+                    conversationId: conversation.id,
+                    direction: 'INBOUND',
+                    type: msg.type,
+                    body: msg.body,
+                    mediaUrl: msg.mediaUrl,
+                    waMessageId: msg.waMessageId,
+                },
+            });
+
+            getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
+            await prisma.whatsAppInboundEvent.update({
+                where: { id: inboundEvent.id },
+                data: { processedAt: new Date() },
+            });
         }
 
         // Update conversation lastMessageAt
@@ -635,5 +673,45 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
 
 router.post(['/webhook', '/webhooks/meta'], processIncomingWebhook);
 router.post('/debug/mock-whatsapp/incoming', authMiddleware, requireWhatsAppAdmin, processIncomingWebhook);
+
+// ─── Meta Cloud media proxy ───────────────────────────────────────────────────
+// Media URLs returned by Meta require an Authorization header and expire in 5 min.
+// Clients request /api/whatsapp/media/:mediaId; we fetch a fresh URL on demand.
+router.get('/media/:mediaId', authMiddleware, async (req: Request, res: ExpressResponse) => {
+    if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'meta-cloud') {
+        return res.status(400).json({ error: 'Media proxy only available for WHATSAPP_PROVIDER=meta-cloud' });
+    }
+
+    const { MetaCloudWhatsAppProvider } = await import('../whatsapp/providers/MetaCloudWhatsAppProvider');
+    const provider = whatsappProvider as InstanceType<typeof MetaCloudWhatsAppProvider>;
+
+    if (typeof provider.resolveMediaUrl !== 'function') {
+        return res.status(501).json({ error: 'Provider não suporta proxy de mídia.' });
+    }
+
+    const media = await provider.resolveMediaUrl(req.params.mediaId);
+    if (!media) {
+        return res.status(404).json({ error: 'Mídia não encontrada ou expirada.' });
+    }
+
+    try {
+        const upstream = await fetch(media.url, {
+            headers: { Authorization: `Bearer ${process.env.META_WHATSAPP_ACCESS_TOKEN || ''}` },
+            signal: AbortSignal.timeout(15000),
+        });
+
+        if (!upstream.ok) {
+            return res.status(upstream.status).json({ error: 'Erro ao baixar mídia da Meta.' });
+        }
+
+        res.setHeader('Content-Type', media.mimeType || upstream.headers.get('content-type') || 'application/octet-stream');
+        res.setHeader('Cache-Control', 'private, max-age=300');
+
+        const buffer = Buffer.from(await upstream.arrayBuffer());
+        res.send(buffer);
+    } catch (error: any) {
+        res.status(500).json({ error: error?.message || 'Erro ao baixar mídia.' });
+    }
+});
 
 export default router;

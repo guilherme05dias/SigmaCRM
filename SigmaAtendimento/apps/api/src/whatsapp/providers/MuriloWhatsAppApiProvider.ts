@@ -159,11 +159,21 @@ export class MuriloWhatsAppApiProvider implements IWhatsAppProvider {
         const data = payload?.message || payload?.payload || payload;
         const fromRaw = data?.phone || data?.number || data?.contact?.phone || data?.from || data?.author || data?._data?.from || "";
         const from = this.normalizePhone(fromRaw);
-        const body = data?.body || data?.text || data?.mensagem || "";
         const senderName = data?._data?.notifyName || data?.pushname || data?.name || null;
         const id = typeof data?.id === "object" ? data.id.id : data?.id;
+        const rawType = data?.type || "chat";
+        const type = this.mapMessageType(rawType);
+        const body = data?.body || data?.text || data?.mensagem || data?.caption || null;
+        const mediaUrl = data?.mediaUrl || null;
+        // server.js envia `fromMe` e `direction`; OUTBOUND = mensagem enviada pelo próprio celular
+        const direction: "INBOUND" | "OUTBOUND" = data?.fromMe === true || data?.direction === "OUTBOUND" ? "OUTBOUND" : "INBOUND";
 
-        if (!from || !body) {
+        if (!from) {
+            return { contact: { phone: from, name: senderName }, messages: [] };
+        }
+
+        // Drop only if there is truly nothing to store (no text, no media)
+        if (!body && !mediaUrl && type === "TEXT") {
             return { contact: { phone: from, name: senderName }, messages: [] };
         }
 
@@ -171,13 +181,22 @@ export class MuriloWhatsAppApiProvider implements IWhatsAppProvider {
             contact: { phone: from, name: senderName },
             messages: [
                 {
-                    direction: "INBOUND",
-                    type: "TEXT",
-                    body,
+                    direction,
+                    type,
+                    body: body || undefined,
+                    mediaUrl: mediaUrl || undefined,
                     waMessageId: id || `murilo_in_${Date.now()}`,
                 },
             ],
         };
+    }
+
+    private mapMessageType(type: string): "TEXT" | "IMAGE" | "AUDIO" | "VIDEO" | "DOCUMENT" {
+        if (type === "image") return "IMAGE";
+        if (type === "audio" || type === "ptt") return "AUDIO";
+        if (type === "video") return "VIDEO";
+        if (type === "document") return "DOCUMENT";
+        return "TEXT";
     }
 
     private async sendMessage(sessionId: string | undefined, body: Record<string, unknown>): Promise<SendMessageResponse> {

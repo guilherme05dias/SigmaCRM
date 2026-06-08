@@ -112,6 +112,7 @@ function formatWhatsAppStatus(status: string) {
         CONNECTED: 'Conectado',
         WORKING: 'Conectado',
         NAO_INICIADO: 'Nao iniciado',
+        NOT_CONFIGURED: 'Não configurado',
     };
 
     return labels[status] || status;
@@ -267,22 +268,26 @@ export default function Settings() {
         }
     }, []);
 
-    const currentWhatsAppSession = sessions.find((session) => session.name === WHATSAPP_SESSION_ID);
+    // For meta-cloud the session name is 'meta-cloud', not 'default'
+    const currentWhatsAppSession = sessions.find((session) => session.name === WHATSAPP_SESSION_ID) || sessions[0] || null;
+    const isMetaCloud = currentWhatsAppSession?.name === 'meta-cloud';
     const whatsAppStatus = currentWhatsAppSession?.status || 'NAO_INICIADO';
-    const hasQrCode = ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
-    const isAuthenticated = whatsAppStatus === 'AUTHENTICATED';
-    const isStarting = whatsAppStatus === 'STARTING';
+    const hasQrCode = !isMetaCloud && ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
+    const isAuthenticated = !isMetaCloud && whatsAppStatus === 'AUTHENTICATED';
+    const isStarting = !isMetaCloud && whatsAppStatus === 'STARTING';
     const isConnected = ['READY', 'CONNECTED', 'WORKING'].includes(whatsAppStatus);
-    const canDisconnect = ['READY', 'CONNECTED', 'WORKING', 'AUTHENTICATED', 'STARTING', 'QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
-    const statusText = isConnected
-        ? 'Conectado'
-        : isAuthenticated
-            ? 'Autenticado, finalizando conexão'
-            : isStarting
-                ? 'Iniciando sessão'
-                : hasQrCode
-                    ? 'Aguardando leitura do QR Code'
-                    : 'Não conectado';
+    const canDisconnect = !isMetaCloud && ['READY', 'CONNECTED', 'WORKING', 'AUTHENTICATED', 'STARTING', 'QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
+    const statusText = isMetaCloud
+        ? (isConnected ? 'API ativa e configurada' : 'API não configurada')
+        : isConnected
+            ? 'Conectado'
+            : isAuthenticated
+                ? 'Autenticado, finalizando conexão'
+                : isStarting
+                    ? 'Iniciando sessão'
+                    : hasQrCode
+                        ? 'Aguardando leitura do QR Code'
+                        : 'Não conectado';
 
     const startWhatsAppSession = async () => {
         setWhatsAppLoading(true);
@@ -558,42 +563,44 @@ export default function Settings() {
                     {/* WhatsApp Integration Card */}
                     <div id="whatsapp" className="scroll-mt-24">
                         <SigmaSettingsCard
-                            title="Conexão WhatsApp"
-                            description="Conecte o canal WhatsApp Web usado no atendimento."
+                            title={isMetaCloud ? 'WhatsApp Business (Cloud API)' : 'Conexão WhatsApp'}
+                            description={isMetaCloud ? 'API oficial da Meta — sem QR Code, sem sessão no celular.' : 'Conecte o canal WhatsApp Web usado no atendimento.'}
                             actionButton={
-                                <div className="flex flex-wrap items-center justify-end gap-2">
-                                    {isConnected && (
+                                !isMetaCloud ? (
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                        {isConnected && (
+                                            <button
+                                                type="button"
+                                                onClick={syncWhatsAppHistory}
+                                                disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                                aria-label="Sincronizar histórico do WhatsApp"
+                                                className="px-4 py-2 bg-surface text-foreground rounded-pill text-sm font-semibold border border-border hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                            >
+                                                {whatsAppSyncing ? 'Sincronizando...' : 'Sincronizar histórico'}
+                                            </button>
+                                        )}
+                                        {canDisconnect && (
+                                            <button
+                                                type="button"
+                                                onClick={disconnectWhatsAppSession}
+                                                disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
+                                                aria-label="Desconectar sessão do WhatsApp"
+                                                className="px-4 py-2 bg-surface text-danger rounded-pill text-sm font-semibold border border-danger/30 hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                            >
+                                                {whatsAppDisconnecting ? 'Desconectando...' : 'Desconectar'}
+                                            </button>
+                                        )}
                                         <button
                                             type="button"
-                                            onClick={syncWhatsAppHistory}
+                                            onClick={startWhatsAppSession}
                                             disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
-                                            aria-label="Sincronizar histórico do WhatsApp"
-                                            className="px-4 py-2 bg-surface text-foreground rounded-pill text-sm font-semibold border border-border hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                            aria-label={isConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp'}
+                                            className="px-4 py-2 bg-primary text-white rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
                                         >
-                                            {whatsAppSyncing ? 'Sincronizando...' : 'Sincronizar histórico'}
+                                            {whatsAppLoading ? 'Conectando...' : isConnected ? 'Reconectar' : 'Conectar WhatsApp'}
                                         </button>
-                                    )}
-                                    {canDisconnect && (
-                                        <button
-                                            type="button"
-                                            onClick={disconnectWhatsAppSession}
-                                            disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
-                                            aria-label="Desconectar sessão do WhatsApp"
-                                            className="px-4 py-2 bg-surface text-danger rounded-pill text-sm font-semibold border border-danger/30 hover:bg-danger-soft disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
-                                        >
-                                            {whatsAppDisconnecting ? 'Desconectando...' : 'Desconectar'}
-                                        </button>
-                                    )}
-                                    <button
-                                        type="button"
-                                        onClick={startWhatsAppSession}
-                                        disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
-                                        aria-label={isConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp'}
-                                        className="px-4 py-2 bg-primary text-white rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
-                                    >
-                                        {whatsAppLoading ? 'Conectando...' : isConnected ? 'Reconectar' : 'Conectar WhatsApp'}
-                                    </button>
-                                </div>
+                                    </div>
+                                ) : undefined
                             }
                         >
                             <div className="p-6">
@@ -611,8 +618,8 @@ export default function Settings() {
                                                 {statusText}
                                             </span>
                                         </p>
-                                        <p className="mt-1 text-xs text-muted-foreground">Sessão: {WHATSAPP_SESSION_ID}</p>
-                                        <p className="mt-1 text-xs text-muted-foreground">Provider: murilo-api</p>
+                                        {!isMetaCloud && <p className="mt-1 text-xs text-muted-foreground">Sessão: {WHATSAPP_SESSION_ID}</p>}
+                                        <p className="mt-1 text-xs text-muted-foreground">Provider: {isMetaCloud ? 'meta-cloud (API oficial)' : 'murilo-api (WhatsApp Web)'}</p>
                                         {whatsAppError && (
                                             <div className="mt-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">
                                                 {whatsAppError}
@@ -627,7 +634,17 @@ export default function Settings() {
                                 </div>
 
                                 <div className="w-full lg:w-[360px]">
-                                    {hasQrCode && !isConnected && qrCodeDataUrl ? (
+                                    {isMetaCloud ? (
+                                        <div className="rounded-xl border border-border bg-surface-alt p-5">
+                                            <p className="mb-3 text-sm font-semibold text-foreground">Configuração do Webhook</p>
+                                            <p className="text-xs text-muted-foreground mb-2">Configure esta URL no Meta for Developers → WhatsApp → Configuration:</p>
+                                            <div className="rounded-lg bg-surface border border-border px-3 py-2 text-xs font-mono text-primary break-all select-all">
+                                                {(import.meta.env.VITE_API_URL || 'http://localhost:3334')}/api/whatsapp/webhooks/meta
+                                            </div>
+                                            <p className="mt-3 text-xs text-muted-foreground mb-1">Assinar o campo: <span className="font-semibold text-foreground">messages</span></p>
+                                            <p className="text-xs text-muted-foreground">Verify Token: defina <span className="font-semibold text-foreground">META_WHATSAPP_VERIFY_TOKEN</span> no .env do servidor.</p>
+                                        </div>
+                                    ) : hasQrCode && !isConnected && qrCodeDataUrl ? (
                                         <div className="rounded-xl border border-border bg-surface-alt p-5 text-center">
                                             <p className="mb-4 text-sm font-semibold text-foreground">Escaneie para conectar</p>
                                             <img src={qrCodeDataUrl} alt="QR Code do WhatsApp" className="mx-auto w-full max-w-[320px] rounded-lg bg-white p-3" />
@@ -652,8 +669,8 @@ export default function Settings() {
 
                             <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
                                 <div className="bg-surface-alt p-4 rounded-xl border border-border text-center">
-                                    <p className="text-xs text-muted-foreground uppercase font-bold tracking-widest mb-1">Sessões</p>
-                                    <p className="text-2xl font-bold text-primary">{sessions.length}</p>
+                                    <p className="text-xs text-muted-foreground uppercase font-bold tracking-widest mb-1">{isMetaCloud ? 'Tipo' : 'Sessões'}</p>
+                                    <p className="text-base font-bold text-primary">{isMetaCloud ? 'Cloud API' : sessions.length}</p>
                                 </div>
                                 <div className="bg-surface-alt p-4 rounded-xl border border-border text-center">
                                     <p className="text-xs text-muted-foreground uppercase font-bold tracking-widest mb-1">Status</p>

@@ -11,9 +11,14 @@ const port = Number(process.env.WHATSAPP_API_PORT || process.env.PORT || 3000);
 const sigmaWebhookUrl = process.env.SIGMA_WEBHOOK_URL || 'http://localhost:3334/api/whatsapp/webhook';
 const sigmaWhatsAppBaseUrl = process.env.SIGMA_WHATSAPP_BASE_URL || sigmaWebhookUrl.replace(/\/webhook$/, '');
 const chromeExecutablePath = process.env.CHROME_EXECUTABLE_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const sigmaInternalToken = process.env.SIGMA_INTERNAL_TOKEN || '';
 
 app.use(express.json({ limit: '50mb' }));
 app.use(require('cors')());
+
+const mediaDir = path.join(__dirname, 'media');
+if (!fs.existsSync(mediaDir)) fs.mkdirSync(mediaDir, { recursive: true });
+app.use('/media', express.static(mediaDir));
 
 
 const sessionsDir = path.join(__dirname, 'sessions'); // Diretório onde as sessões estão armazenadas
@@ -102,38 +107,109 @@ function resolveContactPhone(contact, chat) {
     const contactWid = contact?.id?._serialized || '';
     const chatWid = chat?.id?._serialized || '';
     const mappedPhone = widPhoneMap.get(chatWid) || widPhoneMap.get(contactWid);
-    const rawPhone = mappedPhone || contact?.number || contact?.id?.user || chat?.id?.user || '';
-    return String(rawPhone).replace(/\D/g, '');
+    if (mappedPhone) return String(mappedPhone).replace(/\D/g, '');
+
+    // contact.number is the real phone for @c.us; for @lid it may be empty
+    const rawPhone = contact?.number || '';
+    if (rawPhone) return String(rawPhone).replace(/\D/g, '');
+
+    // For @c.us ids the user part is the phone number
+    const cidUser = contact?.id?.user || '';
+    if (cidUser && !contactWid.endsWith('@lid') && !chatWid.endsWith('@lid')) {
+        return String(cidUser).replace(/\D/g, '');
+    }
+
+    // @lid: id.user is not a phone — return empty so the caller can handle it
+    return '';
 }
 
 async function notifySigmaHistorySync(sessionId) {
+    // Wait for WhatsApp Web to finish loading chats before syncing
+    await new Promise((resolve) => setTimeout(resolve, 5000));
     try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (sigmaInternalToken) headers['x-internal-token'] = sigmaInternalToken;
+
         const response = await fetch(`${sigmaWhatsAppBaseUrl}/sessions/${encodeURIComponent(sessionId)}/sync-history`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ chatLimit: 100, messageLimit: 50 }),
         });
 
         if (!response.ok) {
             console.error(`Falha ao solicitar sincronização de histórico no Sigma: ${response.status}`);
+        } else {
+            console.log(`Histórico sincronizado automaticamente para sessão ${sessionId}`);
         }
     } catch (error) {
         console.error('Erro ao solicitar sincronização de histórico no Sigma:', error);
     }
 }
 
-async function forwardIncomingMessageToSigma(sessionId, message) {
-    if (message.fromMe) return;
+async function resolvePhoneForMessage(contact, fromWid, client) {
+    // Try the wid->phone map first (populated by history sync and check-number)
+    const mapped = widPhoneMap.get(fromWid) || widPhoneMap.get(contact?.id?._serialized || '');
+    if (mapped) return String(mapped).replace(/\D/g, '');
 
+    // contact.number is populated for @c.us; empty for @lid
+    if (contact?.number) return String(contact.number).replace(/\D/g, '');
+
+    // For @lid, try resolving via getNumberId using the id.user part (may contain numeric suffix)
+    const lidUser = contact?.id?.user || '';
+    if (fromWid.endsWith('@lid') && lidUser && client) {
+        try {
+            const numberId = await client.getNumberId(lidUser);
+            if (numberId?._serialized) {
+                const phone = String(numberId.user || lidUser).replace(/\D/g, '');
+                rememberWidPhone(fromWid, phone);
+                rememberWidPhone(numberId._serialized, phone);
+                return phone;
+            }
+        } catch {
+            // ignore — best effort
+        }
+    }
+
+    // For @c.us the user part is the phone
+    if (!fromWid.endsWith('@lid') && contact?.id?.user) {
+        return String(contact.id.user).replace(/\D/g, '');
+    }
+
+    return '';
+}
+
+async function forwardIncomingMessageToSigma(sessionId, message) {
     const messageId = message.id?.id || message.id?._serialized || String(Date.now());
     const dedupeKey = `${sessionId}:${messageId}`;
     if (forwardedIncomingMessageIds.has(dedupeKey)) return;
     forwardedIncomingMessageIds.add(dedupeKey);
 
     try {
+        const client = sessions[sessionId];
         const contact = await message.getContact();
         const wid = contact.id?._serialized || message.from;
-        const contactPhone = String(widPhoneMap.get(message.from) || widPhoneMap.get(wid) || contact.number || contact.id?.user || message.from || '').replace(/\D/g, '');
+        const contactPhone = await resolvePhoneForMessage(contact, wid, client);
+
+        // Download media if present
+        let mediaUrl = null;
+        if (message.hasMedia) {
+            try {
+                const media = await message.downloadMedia();
+                if (media?.data) {
+                    const ext = (media.mimetype || 'application/octet-stream').split('/')[1]?.split(';')[0] || 'bin';
+                    const filename = `${messageId}.${ext}`;
+                    const filePath = path.join(mediaDir, filename);
+                    fs.writeFileSync(filePath, Buffer.from(media.data, 'base64'));
+                    mediaUrl = `http://localhost:${port}/media/${filename}`;
+                }
+            } catch (mediaErr) {
+                console.warn(`Não foi possível baixar mídia da mensagem ${messageId}:`, mediaErr.message);
+            }
+        }
+
+        const direction = message.fromMe ? 'OUTBOUND' : 'INBOUND';
+        const pushname = contact.pushname || contact.name || contact.shortName || null;
+
         const payload = {
             provider: 'murilo-api',
             sessionId,
@@ -144,11 +220,14 @@ async function forwardIncomingMessageToSigma(sessionId, message) {
                 wid,
                 body: message.body || message.caption || '',
                 hasMedia: message.hasMedia,
+                mediaUrl,
                 type: message.type,
+                fromMe: message.fromMe,
+                direction,
                 timestamp: message.timestamp,
-                pushname: contact.pushname || contact.name || contact.shortName || null,
+                pushname,
                 _data: {
-                    notifyName: contact.pushname || contact.name || contact.shortName || null,
+                    notifyName: pushname,
                 },
             },
         };

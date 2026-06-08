@@ -9,6 +9,64 @@ export interface MetaCloudTextMessagePayload {
     };
 }
 
+export type MetaCloudMessageType =
+    | "text"
+    | "image"
+    | "audio"
+    | "video"
+    | "document"
+    | "sticker"
+    | "location"
+    | "contacts"
+    | "interactive"
+    | "button"
+    | "order"
+    | "system"
+    | "unknown"
+    | "unsupported";
+
+export interface MetaCloudMediaObject {
+    id?: string;
+    link?: string;
+    caption?: string;
+    filename?: string;
+    mime_type?: string;
+    sha256?: string;
+}
+
+export interface MetaCloudIncomingMessage {
+    from: string;
+    id: string;
+    timestamp: string;
+    type: MetaCloudMessageType;
+    text?: { body: string };
+    image?: MetaCloudMediaObject;
+    audio?: MetaCloudMediaObject;
+    video?: MetaCloudMediaObject;
+    document?: MetaCloudMediaObject;
+    sticker?: MetaCloudMediaObject;
+    location?: {
+        latitude: number;
+        longitude: number;
+        name?: string;
+        address?: string;
+    };
+    context?: {
+        forwarded?: boolean;
+        from?: string;
+        id?: string;
+    };
+}
+
+export interface MetaMediaInfoResponse {
+    id: string;
+    url: string;
+    mime_type: string;
+    sha256: string;
+    file_size: number;
+    messaging_product: "whatsapp";
+}
+
 export interface MetaCloudWebhookEntry {
     id: string;
     changes: Array<{
@@ -22,14 +80,13 @@ export interface MetaCloudWebhookEntry {
                 profile: { name: string };
                 wa_id: string;
             }>;
-            messages?: Array<{
-                from: string;
+            messages?: MetaCloudIncomingMessage[];
+            statuses?: Array<{
                 id: string;
+                status: "sent" | "delivered" | "read" | "failed";
                 timestamp: string;
-                type: string;
-                text?: { body: string };
+                recipient_id: string;
             }>;
-            statuses?: Array<any>;
         };
         field: "messages";
     }>;
@@ -38,4 +95,10 @@ export interface MetaCloudWebhookEntry {
 export interface MetaCloudWebhookPayload {
     object: "whatsapp_business_account" | string;
     entry: MetaCloudWebhookEntry[];
+}
+
+export interface MetaSendMessageResponse {
+    messaging_product: "whatsapp";
+    contacts: Array<{ input: string; wa_id: string }>;
+    messages: Array<{ id: string; message_status?: string }>;
 }
