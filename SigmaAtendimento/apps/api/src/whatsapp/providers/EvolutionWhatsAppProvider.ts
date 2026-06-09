@@ -45,7 +45,7 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
                 apikey: this.apiKey,
             },
             body: JSON.stringify({
-                instanceName: sessionId || this.instanceName,
+                instanceName: this.resolveSessionId(sessionId),
                 integration: "WHATSAPP-BAILEYS",
                 qrcode: true,
             }),
@@ -58,7 +58,7 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
     }
 
     async disconnectSession(sessionId: string): Promise<void> {
-        const response = await fetch(`${this.baseUrl}/instance/logout/${encodeURIComponent(sessionId || this.instanceName)}`, {
+        const response = await fetch(`${this.baseUrl}/instance/logout/${encodeURIComponent(this.resolveSessionId(sessionId))}`, {
             method: "DELETE",
             headers: { apikey: this.apiKey },
         });
@@ -77,10 +77,16 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
         const payload = await this.readJson<SessionResponse>(response);
         
         if (response.ok && payload?.instance?.state) {
+            let mappedStatus = "STARTING";
+            const state = payload.instance.state.toLowerCase();
+            if (state === "open") mappedStatus = "CONNECTED";
+            else if (state === "connecting") mappedStatus = "QR_AVAILABLE_OR_AUTH_PENDING";
+            else if (state === "close") mappedStatus = "NAO_INICIADO";
+            
             return [
                 {
                     name: payload.instance.instanceName || this.instanceName,
-                    status: payload.instance.state,
+                    status: mappedStatus,
                 },
             ];
         }
@@ -95,7 +101,7 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
 
     async checkContact(phone: string, sessionId?: string): Promise<WhatsAppContactCheck> {
         const normalizedPhone = this.normalizePhone(phone);
-        const resolvedInstance = sessionId || this.instanceName;
+        const resolvedInstance = this.resolveSessionId(sessionId);
         const response = await fetch(`${this.baseUrl}/chat/whatsappNumbers/${encodeURIComponent(resolvedInstance)}`, {
             method: "POST",
             headers: {
@@ -234,7 +240,7 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
     }
 
     private async sendMessage(endpoint: string, sessionId: string | undefined, body: Record<string, unknown>): Promise<SendMessageResponse> {
-        const resolvedSessionId = sessionId || this.instanceName;
+        const resolvedSessionId = this.resolveSessionId(sessionId);
         const response = await fetch(`${this.baseUrl}/message/${endpoint}/${encodeURIComponent(resolvedSessionId)}`, {
             method: "POST",
             headers: {
@@ -262,5 +268,9 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
 
     private normalizePhone(value: string): string {
         return value.replace("@s.whatsapp.net", "").replace("@c.us", "").replace(/\D/g, "");
+    }
+
+    private resolveSessionId(sessionId?: string): string {
+        return !sessionId || sessionId === "default" ? this.instanceName : sessionId;
     }
 }

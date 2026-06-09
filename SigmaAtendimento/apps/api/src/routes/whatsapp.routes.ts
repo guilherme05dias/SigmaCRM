@@ -301,8 +301,24 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
 
 router.get('/sessions/:sessionId/qrcode', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
-        if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'murilo-api') {
-            return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api' });
+        const provider = process.env.WHATSAPP_PROVIDER || 'mock';
+        if (provider !== 'murilo-api' && provider !== 'evolution') {
+            return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api ou evolution' });
+        }
+
+        if (provider === 'evolution') {
+            const evolutionUrl = (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, '');
+            const apiKey = process.env.EVOLUTION_API_KEY || '';
+            const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'sigma-principal';
+            const targetSession = req.params.sessionId === 'default' ? instanceName : req.params.sessionId;
+            const response = await fetch(`${evolutionUrl}/instance/connect/${encodeURIComponent(targetSession)}`, {
+                headers: { apikey: apiKey }
+            });
+            const payload = await readJson<{ base64?: string; error?: string }>(response);
+            if (!response.ok) {
+                return res.status(response.status).json({ error: payload?.error || 'QR Code não disponível' });
+            }
+            return res.json({ qrCode: payload?.base64 });
         }
 
         const response = await fetch(`${muriloApiBaseUrl}/get-qrcode/${encodeURIComponent(req.params.sessionId)}`);
@@ -320,8 +336,24 @@ router.get('/sessions/:sessionId/qrcode', authMiddleware, requireWhatsAppAdmin, 
 
 router.get('/sessions/:sessionId/qrcode-image', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
-        if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'murilo-api') {
-            return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api' });
+        const provider = process.env.WHATSAPP_PROVIDER || 'mock';
+        if (provider !== 'murilo-api' && provider !== 'evolution') {
+            return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api ou evolution' });
+        }
+
+        if (provider === 'evolution') {
+            const evolutionUrl = (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, '');
+            const apiKey = process.env.EVOLUTION_API_KEY || '';
+            const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'sigma-principal';
+            const targetSession = req.params.sessionId === 'default' ? instanceName : req.params.sessionId;
+            const response = await fetch(`${evolutionUrl}/instance/connect/${encodeURIComponent(targetSession)}`, {
+                headers: { apikey: apiKey }
+            });
+            const payload = await readJson<{ base64?: string; error?: string }>(response);
+            if (!response.ok) {
+                return res.status(response.status).json({ error: payload?.error || 'QR Code não disponível' });
+            }
+            return res.json({ qrCodeDataUrl: payload?.base64 });
         }
 
         const response = await fetch(`${muriloApiBaseUrl}/get-qrcode-image/${encodeURIComponent(req.params.sessionId)}`);
@@ -339,15 +371,34 @@ router.get('/sessions/:sessionId/qrcode-image', authMiddleware, requireWhatsAppA
 
 router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
     try {
-        if ((process.env.WHATSAPP_PROVIDER || 'mock') !== 'murilo-api') {
-            return res.status(400).send('QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api');
+        const provider = process.env.WHATSAPP_PROVIDER || 'mock';
+        if (provider !== 'murilo-api' && provider !== 'evolution') {
+            return res.status(400).send('QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api ou evolution');
         }
 
-        const response = await fetch(`${muriloApiBaseUrl}/get-qrcode-image/${encodeURIComponent(req.params.sessionId)}`);
-        const payload = await readJson<{ qrCodeDataUrl?: string; message?: string }>(response);
+        let qrCodeDataUrl: string | undefined;
+        let errorMessage: string | undefined;
 
-        if (!response.ok || !payload?.qrCodeDataUrl) {
-            return res.status(response.status).send(payload?.message || 'QR Code não disponível. Inicie a sessão e tente novamente.');
+        if (provider === 'evolution') {
+            const evolutionUrl = (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, '');
+            const apiKey = process.env.EVOLUTION_API_KEY || '';
+            const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'sigma-principal';
+            const targetSession = req.params.sessionId === 'default' ? instanceName : req.params.sessionId;
+            const response = await fetch(`${evolutionUrl}/instance/connect/${encodeURIComponent(targetSession)}`, {
+                headers: { apikey: apiKey }
+            });
+            const payload = await readJson<{ base64?: string; error?: string }>(response);
+            qrCodeDataUrl = payload?.base64;
+            errorMessage = payload?.error || (!response.ok ? 'QR Code não disponível na Evolution' : undefined);
+        } else {
+            const response = await fetch(`${muriloApiBaseUrl}/get-qrcode-image/${encodeURIComponent(req.params.sessionId)}`);
+            const payload = await readJson<{ qrCodeDataUrl?: string; message?: string }>(response);
+            qrCodeDataUrl = payload?.qrCodeDataUrl;
+            errorMessage = payload?.message || (!response.ok ? 'QR Code não disponível no murilo-api' : undefined);
+        }
+
+        if (!qrCodeDataUrl) {
+            return res.status(400).send(errorMessage || 'QR Code não disponível. Inicie a sessão e tente novamente.');
         }
 
         res.type('html').send(`<!doctype html>
@@ -369,7 +420,7 @@ router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireWhatsAppAd
   <main>
     <h1>Conectar WhatsApp</h1>
     <p>Abra o WhatsApp no celular e escaneie o QR Code da sessão <strong>${req.params.sessionId}</strong>.</p>
-    <img src="${payload.qrCodeDataUrl}" alt="QR Code do WhatsApp" />
+    <img src="${qrCodeDataUrl}" alt="QR Code do WhatsApp" />
     <code>GET /api/whatsapp/sessions/${req.params.sessionId}/qrcode-page</code>
   </main>
 </body>

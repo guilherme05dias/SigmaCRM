@@ -20,6 +20,13 @@
   --c-elevated:      #ffffff;
   --c-border:        #e0e2e6;
 
+  /* Chat — tokens semânticos para o ChatWindow */
+  --c-chat-bg:          #f0f4f8;  /* fundo da área de mensagens — slate muito claro */
+  --c-chat-input-bg:    #f8fafc;  /* barra de input */
+  --c-chat-bubble-in:   #ffffff;  /* bolha recebida (INBOUND) */
+  --c-chat-bubble-out:  #dbeafe;  /* bolha enviada (OUTBOUND) — primary-100 equivalente */
+  --c-chat-sig:         #1b61c9;  /* cor da assinatura do técnico — primary-600 */
+
   /* Primária — canais RGB (suporta /N opacity) */
   --c-primary:     27 97 201;    /* #1b61c9 — Airtable Blue */
   --c-primary-fg:  255 255 255;
@@ -65,6 +72,13 @@
   --c-surface-alt:  #222630;
   --c-elevated:     #222630;
   --c-border:       #2d3748;
+
+  /* Chat — dark mode */
+  --c-chat-bg:          #161920;  /* fundo do chat escuro */
+  --c-chat-input-bg:    #1a1d25;  /* barra de input escura */
+  --c-chat-bubble-in:   #1e2230;  /* bolha recebida */
+  --c-chat-bubble-out:  #1a2d52;  /* bolha enviada — primary-50 dark */
+  --c-chat-sig:         #4f94f6;  /* assinatura — primary-400 dark */
 
   --c-primary:     79 148 246;   /* #4f94f6 — Airtable Blue mais vivo no dark */
   --c-primary-fg:  255 255 255;
