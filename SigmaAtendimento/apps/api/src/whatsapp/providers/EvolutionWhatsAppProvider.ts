@@ -127,8 +127,44 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
     }
 
     async syncHistory(options: WhatsAppHistorySyncOptions = {}): Promise<WhatsAppHistoryChat[]> {
-        // Implementado na Tarefa E.6
-        return [];
+        const resolvedInstance = this.resolveSessionId(options.sessionId);
+        
+        try {
+            const response = await fetch(`${this.baseUrl}/chat/findChats/${encodeURIComponent(resolvedInstance)}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    apikey: this.apiKey,
+                },
+                body: JSON.stringify({ limit: options.chatLimit || 100 })
+            });
+
+            if (!response.ok) return [];
+
+            const chatsPayload = await this.readJson<any[]>(response);
+            if (!Array.isArray(chatsPayload)) return [];
+
+            const result: WhatsAppHistoryChat[] = [];
+
+            for (const chat of chatsPayload) {
+                const phone = this.normalizePhone(chat.remoteJid || chat.id || "");
+                // Ignora contatos inválidos ou grupos
+                if (!phone || phone.includes("g.us")) continue;
+
+                result.push({
+                    phone,
+                    name: chat.pushName || chat.name || undefined,
+                    unreadCount: chat.unreadCount || 0,
+                    lastMessageAt: chat.conversationTimestamp || undefined,
+                    messages: [], // Evolutions exige query separada para mensagens (findMessages). Retornamos os chats para sync básico de contatos.
+                });
+            }
+
+            return result;
+        } catch (error) {
+            console.error("[Evolution] Falha ao sincronizar histórico:", error);
+            return [];
+        }
     }
 
     async sendText(params: { to: string; body: string; sessionId?: string }): Promise<{ waMessageId: string }> {
