@@ -676,25 +676,25 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
     try {
         const payload = req.body;
 
-        const parsed = await whatsappProvider.parseIncoming(payload);
-
-        if (process.env.EVOLUTION_DEBUG_WEBHOOK === 'true' && parsed.messages.length > 0) {
-            console.log('[SIGMA Webhook] parsed messages:', parsed.messages.map(m => ({
-                type: m.type,
-                hasMedia: !!m.mediaUrl,
-                mediaLen: m.mediaUrl?.length ?? 0,
-                body: m.body?.slice(0, 50),
-            })));
-        }
-
         // Responde 200 imediatamente — Evolution não precisa aguardar o processamento
         res.status(200).json({ ok: true });
-
-        if (parsed.messages.length === 0) return;
 
         // Todo o processamento em background — não bloqueia a resposta
         setImmediate(async () => {
             try {
+                const parsed = await whatsappProvider.parseIncoming(payload);
+
+                if (process.env.EVOLUTION_DEBUG_WEBHOOK === 'true' && parsed.messages.length > 0) {
+                    console.log('[SIGMA Webhook] parsed messages:', parsed.messages.map(m => ({
+                        type: m.type,
+                        hasMedia: !!m.mediaUrl,
+                        mediaLen: m.mediaUrl?.length ?? 0,
+                        body: m.body?.slice(0, 50),
+                    })));
+                }
+
+                if (parsed.messages.length === 0) return;
+
                 await processWebhookPayload(parsed, payload);
             } catch (err) {
                 console.error('[SIGMA] Erro ao processar webhook em background:', err);
