@@ -157,8 +157,80 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
     }
 
     async parseIncoming(payload: any): Promise<ParsedIncomingPayload> {
-        // Implementado na Tarefa E.4
-        return { contact: { phone: "" }, messages: [] };
+        // Eventos que não são mensagem (CONNECTION_UPDATE, QRCODE_UPDATED) -> retornar vazio
+        if (payload?.event && payload.event !== "messages.upsert") {
+            return { contact: { phone: "" }, messages: [] };
+        }
+
+        const data = payload?.data?.message || payload?.data;
+        if (!data || !data.key) {
+            return { contact: { phone: "" }, messages: [] };
+        }
+
+        const from = this.normalizePhone(data.key.remoteJid || "");
+        if (!from) {
+            return { contact: { phone: from }, messages: [] };
+        }
+
+        const direction: "INBOUND" | "OUTBOUND" = data.key.fromMe ? "OUTBOUND" : "INBOUND";
+        const waMessageId = data.key.id || `evolution_in_${Date.now()}`;
+        const senderName = data.pushName || null;
+
+        const msgObj = data.message || {};
+        let body: string | undefined = undefined;
+        let mediaUrl: string | undefined = undefined;
+        let type: "TEXT" | "IMAGE" | "AUDIO" | "VIDEO" | "DOCUMENT" = "TEXT";
+
+        if (msgObj.conversation) {
+            body = msgObj.conversation;
+        } else if (msgObj.extendedTextMessage?.text) {
+            body = msgObj.extendedTextMessage.text;
+        } else if (msgObj.imageMessage) {
+            type = "IMAGE";
+            body = msgObj.imageMessage.caption;
+            mediaUrl = data.messageType === "imageMessage" ? data.base64 : undefined;
+        } else if (msgObj.videoMessage) {
+            type = "VIDEO";
+            body = msgObj.videoMessage.caption;
+            mediaUrl = data.messageType === "videoMessage" ? data.base64 : undefined;
+        } else if (msgObj.audioMessage) {
+            type = "AUDIO";
+            mediaUrl = data.messageType === "audioMessage" ? data.base64 : undefined;
+        } else if (msgObj.documentMessage) {
+            type = "DOCUMENT";
+            body = msgObj.documentMessage.fileName || msgObj.documentMessage.caption;
+            mediaUrl = data.messageType === "documentMessage" ? data.base64 : undefined;
+        }
+
+        // Caso a media venha como base64, adaptamos para um formato data URI ou passamos pra frente.
+        // A Evolution envia "base64" no objeto se base64 for habilitado.
+        if (mediaUrl && !mediaUrl.startsWith("http") && !mediaUrl.startsWith("data:")) {
+            // Define MIME type aproximado se não fornecido
+            let mimeType = "application/octet-stream";
+            if (type === "IMAGE") mimeType = msgObj.imageMessage?.mimetype || "image/jpeg";
+            else if (type === "AUDIO") mimeType = msgObj.audioMessage?.mimetype || "audio/ogg";
+            else if (type === "VIDEO") mimeType = msgObj.videoMessage?.mimetype || "video/mp4";
+            else if (type === "DOCUMENT") mimeType = msgObj.documentMessage?.mimetype || "application/pdf";
+            
+            mediaUrl = `data:${mimeType};base64,${mediaUrl}`;
+        }
+
+        if (!body && !mediaUrl && type === "TEXT") {
+            return { contact: { phone: from, name: senderName }, messages: [] };
+        }
+
+        return {
+            contact: { phone: from, name: senderName },
+            messages: [
+                {
+                    direction,
+                    type,
+                    body,
+                    mediaUrl,
+                    waMessageId,
+                },
+            ],
+        };
     }
 
     private async sendMessage(endpoint: string, sessionId: string | undefined, body: Record<string, unknown>): Promise<SendMessageResponse> {

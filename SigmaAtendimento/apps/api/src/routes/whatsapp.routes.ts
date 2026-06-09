@@ -486,13 +486,20 @@ router.get(['/webhook', '/webhooks/meta'], (req: Request, res: ExpressResponse) 
 
 // Main Webhook endpoint for Meta Cloud API messages and events
 async function processIncomingWebhook(req: Request, res: ExpressResponse) {
-    // Só valida em provider real (meta-cloud). Mock/debug continuam livres.
+    // Só valida em provider real (meta-cloud e evolution). Mock/debug continuam livres.
     if ((process.env.WHATSAPP_PROVIDER || 'mock') === 'meta-cloud') {
         const rawBody = (req as any).rawBody as Buffer | undefined;
         const signature = req.headers['x-hub-signature-256'] as string | undefined;
         if (!rawBody || !verifyMetaSignature(rawBody, signature)) {
             console.warn('[SIGMA] Webhook rejeitado: assinatura inválida.');
             return res.status(401).json({ error: 'Invalid signature' });
+        }
+    } else if ((process.env.WHATSAPP_PROVIDER || 'mock') === 'evolution') {
+        const evolutionToken = process.env.EVOLUTION_WEBHOOK_TOKEN;
+        const queryToken = req.query.token as string | undefined;
+        if (evolutionToken && queryToken !== evolutionToken) {
+            console.warn('[SIGMA] Webhook rejeitado: token da Evolution inválido.');
+            return res.status(401).json({ error: 'Invalid token' });
         }
     }
 
