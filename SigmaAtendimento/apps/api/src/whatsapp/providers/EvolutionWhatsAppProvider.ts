@@ -199,9 +199,13 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
     }
 
     async parseIncoming(payload: any): Promise<ParsedIncomingPayload> {
-        // Eventos que não são mensagem (CONNECTION_UPDATE, QRCODE_UPDATED) -> retornar vazio
-        if (payload?.event && payload.event !== "messages.upsert") {
-            return { contact: { phone: "" }, messages: [] };
+        // Evolution v2 envia evento em MAIÚSCULAS (MESSAGES_UPSERT) ou minúsculas (messages.upsert)
+        const event: string | undefined = payload?.event;
+        if (event) {
+            const normalized = event.toLowerCase().replace(/_/g, ".");
+            if (normalized !== "messages.upsert") {
+                return { contact: { phone: "" }, messages: [] };
+            }
         }
 
         const data = payload?.data;
@@ -209,7 +213,14 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
             return { contact: { phone: "" }, messages: [] };
         }
 
-        const from = this.normalizePhone(data.key.remoteJid || "");
+        const remoteJid: string = data.key.remoteJid || "";
+
+        // Ignora mensagens de grupos (@g.us)
+        if (remoteJid.endsWith("@g.us")) {
+            return { contact: { phone: "" }, messages: [] };
+        }
+
+        const from = this.normalizePhone(remoteJid);
         if (!from) {
             return { contact: { phone: from }, messages: [] };
         }
@@ -219,6 +230,17 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
         const senderName = data.pushName || null;
 
         const msgObj = data.message || {};
+
+        if (process.env.EVOLUTION_DEBUG_WEBHOOK === 'true') {
+            const mediaKeys = ['imageMessage', 'videoMessage', 'audioMessage', 'documentMessage'];
+            const hasMedia = mediaKeys.some(k => msgObj[k]);
+            if (hasMedia) {
+                console.log('[Evolution DEBUG] media payload - messageType:', data.messageType,
+                    'has base64:', !!data.base64, 'base64 length:', data.base64?.length ?? 0,
+                    'msgObj keys:', Object.keys(msgObj));
+            }
+        }
+
         let body: string | undefined = undefined;
         let mediaUrl: string | undefined = undefined;
         let type: "TEXT" | "IMAGE" | "AUDIO" | "VIDEO" | "DOCUMENT" = "TEXT";
@@ -230,31 +252,34 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
         } else if (msgObj.imageMessage) {
             type = "IMAGE";
             body = msgObj.imageMessage.caption;
-            mediaUrl = data.messageType === "imageMessage" ? data.base64 : undefined;
+            mediaUrl = msgObj.base64 || data.base64 || msgObj.imageMessage.base64 || undefined;
+            if (mediaUrl && !mediaUrl.startsWith('data:')) {
+                const mime = msgObj.imageMessage?.mimetype || 'image/jpeg';
+                mediaUrl = `data:${mime};base64,${mediaUrl}`;
+            }
         } else if (msgObj.videoMessage) {
             type = "VIDEO";
             body = msgObj.videoMessage.caption;
-            mediaUrl = data.messageType === "videoMessage" ? data.base64 : undefined;
+            mediaUrl = msgObj.base64 || data.base64 || msgObj.videoMessage.base64 || undefined;
+            if (mediaUrl && !mediaUrl.startsWith('data:')) {
+                const mime = msgObj.videoMessage?.mimetype || 'video/mp4';
+                mediaUrl = `data:${mime};base64,${mediaUrl}`;
+            }
         } else if (msgObj.audioMessage) {
             type = "AUDIO";
-            mediaUrl = data.messageType === "audioMessage" ? data.base64 : undefined;
+            mediaUrl = msgObj.base64 || data.base64 || msgObj.audioMessage.base64 || undefined;
+            if (mediaUrl && !mediaUrl.startsWith('data:')) {
+                const mime = msgObj.audioMessage?.mimetype || 'audio/ogg';
+                mediaUrl = `data:${mime};base64,${mediaUrl}`;
+            }
         } else if (msgObj.documentMessage) {
             type = "DOCUMENT";
             body = msgObj.documentMessage.fileName || msgObj.documentMessage.caption;
-            mediaUrl = data.messageType === "documentMessage" ? data.base64 : undefined;
-        }
-
-        // Caso a media venha como base64, adaptamos para um formato data URI ou passamos pra frente.
-        // A Evolution envia "base64" no objeto se base64 for habilitado.
-        if (mediaUrl && !mediaUrl.startsWith("http") && !mediaUrl.startsWith("data:")) {
-            // Define MIME type aproximado se não fornecido
-            let mimeType = "application/octet-stream";
-            if (type === "IMAGE") mimeType = msgObj.imageMessage?.mimetype || "image/jpeg";
-            else if (type === "AUDIO") mimeType = msgObj.audioMessage?.mimetype || "audio/ogg";
-            else if (type === "VIDEO") mimeType = msgObj.videoMessage?.mimetype || "video/mp4";
-            else if (type === "DOCUMENT") mimeType = msgObj.documentMessage?.mimetype || "application/pdf";
-            
-            mediaUrl = `data:${mimeType};base64,${mediaUrl}`;
+            mediaUrl = msgObj.base64 || data.base64 || msgObj.documentMessage.base64 || undefined;
+            if (mediaUrl && !mediaUrl.startsWith('data:')) {
+                const mime = msgObj.documentMessage?.mimetype || 'application/octet-stream';
+                mediaUrl = `data:${mime};base64,${mediaUrl}`;
+            }
         }
 
         if (!body && !mediaUrl && type === "TEXT") {

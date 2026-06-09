@@ -57,7 +57,7 @@ async function main() {
 
   // ───────────────────── EMPRESA A — DragonByte ─────────────────────
   const companyA = await prisma.company.create({
-    data: { name: 'DragonByte Solutions', legalName: 'DragonByte Tecnologia Ltda' },
+    data: { name: 'SigmaPDV', legalName: 'SigmaPDV' },
   });
   await prisma.settings.create({
     data: {
@@ -77,9 +77,9 @@ async function main() {
   });
 
   const aAdmin = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Guilherme', email: 'admin@dragonbyte.com', passwordHash: devPasswordHash, role: 'ADMIN', departmentId: aSupport.id },
+    data: { companyId: companyA.id, name: 'Guilherme', email: 'admin@sigmapdv.com', passwordHash: devPasswordHash, role: 'ADMIN', departmentId: aSupport.id },
   });
-  await setMessageSignature(aAdmin.id, 'Guilherme Dias | Suporte tecnico');
+  await setMessageSignature(aAdmin.id, 'Guilherme Dias | Suporte técnico');
   const aSupervisor = await prisma.user.create({
     data: { companyId: companyA.id, name: 'Marina Supervisora', email: 'supervisor@dragonbyte.com', passwordHash: devPasswordHash, role: 'SUPERVISOR', departmentId: aSupport.id },
   });

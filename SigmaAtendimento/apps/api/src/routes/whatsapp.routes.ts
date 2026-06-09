@@ -32,7 +32,12 @@ function internalOrAdminAuth(req: Request, res: ExpressResponse, next: NextFunct
     authMiddleware(req, res, () => requireWhatsAppAdmin(req, res, next));
 }
 
+// Cache em memória — evita query ao banco a cada webhook recebido
+let _cachedWebhookCompanyId: string | null = null;
+
 async function getWebhookCompanyId(): Promise<string> {
+    if (_cachedWebhookCompanyId) return _cachedWebhookCompanyId;
+
     const configuredCompanyId = process.env.DEFAULT_COMPANY_ID || process.env.SIGMA_DEFAULT_COMPANY_ID;
 
     if (configuredCompanyId) {
@@ -40,9 +45,9 @@ async function getWebhookCompanyId(): Promise<string> {
             where: { id: configuredCompanyId },
             select: { id: true },
         });
-
         if (configuredCompany) {
-            return configuredCompany.id;
+            _cachedWebhookCompanyId = configuredCompany.id;
+            return _cachedWebhookCompanyId;
         }
     }
 
@@ -59,7 +64,8 @@ async function getWebhookCompanyId(): Promise<string> {
         throw new Error('Empresa padrão não encontrada para processar o webhook do WhatsApp.');
     }
 
-    return company.id;
+    _cachedWebhookCompanyId = company.id;
+    return _cachedWebhookCompanyId;
 }
 
 async function clearWhatsAppOperationalData(companyId: string): Promise<void> {
@@ -91,9 +97,18 @@ async function readJson<T>(response: globalThis.Response): Promise<T | null> {
     }
 }
 
-function stableInboundMessageId(payload: unknown, phone: string, message: { type?: string; body?: string; mediaUrl?: string }) {
+function stableInboundMessageId(
+    payload: unknown,
+    phone: string,
+    message: { type?: string; body?: string; mediaUrl?: string }
+) {
+    // Não inclui base64 no hash — usa apenas referência do tipo
+    const mediaRef = message.mediaUrl?.startsWith('data:')
+        ? `base64:${message.type}`
+        : message.mediaUrl;
+
     const hash = createHash('sha256')
-        .update(JSON.stringify({ phone, type: message.type, body: message.body, mediaUrl: message.mediaUrl, payload }))
+        .update(JSON.stringify({ phone, type: message.type, body: message.body, mediaRef }))
         .digest('hex')
         .slice(0, 48);
     return `in_${hash}`;
@@ -535,6 +550,110 @@ router.get(['/webhook', '/webhooks/meta'], (req: Request, res: ExpressResponse) 
     return res.status(400).json({ error: 'Missing hub parameters' });
 });
 
+// Processa payload do webhook em background (sem bloquear resposta HTTP)
+async function processWebhookPayload(parsed: Awaited<ReturnType<typeof whatsappProvider.parseIncoming>>, rawPayload: any) {
+    const phone = parsed.contact.phone;
+    const name = parsed.contact.name || undefined;
+    const companyId = await getWebhookCompanyId(); // cached após 1ª chamada
+
+    // Find or create Contact
+    let contact = await prisma.contact.findFirst({ where: { companyId, phone } });
+    if (!contact) {
+        contact = await prisma.contact.create({ data: { companyId, phone, name } });
+    } else if (name && contact.name !== name) {
+        contact = await prisma.contact.update({ where: { id: contact.id }, data: { name } });
+    }
+
+    // Find or create Conversation — reabre fechadas em vez de criar duplicatas
+    let conversation = await prisma.conversation.findFirst({
+        where: { companyId, contactId: contact.id },
+        orderBy: { createdAt: 'desc' },
+    });
+
+    let isNewConversation = false;
+    let hasInbound = false;
+    if (!conversation) {
+        conversation = await prisma.conversation.create({
+            data: { companyId, contactId: contact.id, status: 'OPEN', startedAt: new Date() },
+        });
+        isNewConversation = true;
+    } else if (conversation.status === 'CLOSED') {
+        conversation = await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { status: 'OPEN', closedAt: null, startedAt: new Date() },
+        });
+        isNewConversation = true;
+    }
+
+    for (const msg of parsed.messages) {
+        if (msg.direction === 'OUTBOUND') {
+            if (!msg.waMessageId) continue;
+            const existing = await prisma.message.findFirst({
+                where: { companyId, conversationId: conversation.id, waMessageId: msg.waMessageId },
+            });
+            if (existing) continue;
+            const message = await prisma.message.create({
+                data: { companyId, conversationId: conversation.id, direction: 'OUTBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId },
+            });
+            getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
+            continue;
+        }
+
+        // INBOUND — deduplicação via whatsAppInboundEvent
+        let inboundEvent;
+        try {
+            inboundEvent = await prisma.whatsAppInboundEvent.create({
+                data: {
+                    companyId,
+                    provider: currentWhatsAppProvider(),
+                    providerMessageId: msg.waMessageId || stableInboundMessageId(rawPayload, phone, msg),
+                    fromPhone: phone,
+                    rawPayload,
+                },
+            });
+        } catch (error: any) {
+            if (error?.code === 'P2002') continue; // mensagem duplicada
+            throw error;
+        }
+
+        const message = await prisma.message.create({
+            data: { companyId, conversationId: conversation.id, direction: 'INBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId },
+        });
+
+        hasInbound = true;
+
+        // Emite socket imediatamente — frontend vê a mensagem antes das writes restantes
+        getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
+
+        // Marca inboundEvent como processado em background (não bloqueia o socket emit)
+        prisma.whatsAppInboundEvent.update({ where: { id: inboundEvent.id }, data: { processedAt: new Date() } }).catch(() => {});
+    }
+
+    // Atualiza lastMessageAt e emite update de conversa (leve, sem includes)
+    await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
+    emitToCompany(companyId, 'conversation:updated', { id: conversation.id, lastMessageAt: new Date(), contactId: contact.id });
+
+    if (isNewConversation) {
+        emitToCompany(companyId, 'conversation:new', { id: conversation.id, contactId: contact.id, contact, status: 'OPEN' });
+
+        // Mensagem de boas-vindas — só se o cliente enviou (INBOUND) e não é grupo
+        try {
+            const settings = await getCurrentSettings(companyId);
+            if (settings.welcomeMessage && hasInbound) {
+                const systemMsg = await prisma.message.create({
+                    data: { companyId, conversationId: conversation.id, direction: 'SYSTEM', type: 'TEXT', body: settings.welcomeMessage },
+                });
+                getIO().to(`conversation:${conversation.id}`).emit('message:new', systemMsg);
+                getWhatsAppProvider().sendText({ to: phone, body: settings.welcomeMessage }).catch((err) => {
+                    console.error('[SIGMA] Falha ao enviar mensagem de boas-vindas:', err);
+                });
+            }
+        } catch (err) {
+            console.error('[SIGMA] Falha na mensagem automática:', err);
+        }
+    }
+}
+
 // Main Webhook endpoint for Meta Cloud API messages and events
 async function processIncomingWebhook(req: Request, res: ExpressResponse) {
     // Só valida em provider real (meta-cloud e evolution). Mock/debug continuam livres.
@@ -556,185 +675,31 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
 
     try {
         const payload = req.body;
-        console.log('Received WhatsApp Webhook:', JSON.stringify(payload, null, 2));
 
         const parsed = await whatsappProvider.parseIncoming(payload);
 
-        // If it isn't an incoming message, we still return 200 OK
-        if (parsed.messages.length === 0) {
-            return res.status(200).json({ ok: true });
+        if (process.env.EVOLUTION_DEBUG_WEBHOOK === 'true' && parsed.messages.length > 0) {
+            console.log('[SIGMA Webhook] parsed messages:', parsed.messages.map(m => ({
+                type: m.type,
+                hasMedia: !!m.mediaUrl,
+                mediaLen: m.mediaUrl?.length ?? 0,
+                body: m.body?.slice(0, 50),
+            })));
         }
 
-        const phone = parsed.contact.phone;
-        const name = parsed.contact.name || undefined;
-        const companyId = await getWebhookCompanyId();
-
-        // Find or create Contact
-        let contact = await prisma.contact.findFirst({
-            where: { companyId, phone },
-        });
-
-        if (!contact) {
-            contact = await prisma.contact.create({
-                data: { companyId, phone, name },
-            });
-        } else if ((name && contact.name !== name) || contact.companyId !== companyId) {
-            contact = await prisma.contact.update({
-                where: { id: contact.id },
-                data: {
-                    companyId,
-                    ...(name && contact.name !== name ? { name } : {}),
-                },
-            });
-        }
-
-        // Find or create Conversation — reopen closed ones instead of creating duplicates
-        let conversation = await prisma.conversation.findFirst({
-            where: {
-                companyId,
-                contactId: contact.id,
-            },
-            orderBy: { createdAt: 'desc' },
-        });
-
-        let isNewConversation = false;
-        if (!conversation) {
-            conversation = await prisma.conversation.create({
-                data: {
-                    companyId,
-                    contactId: contact.id,
-                    status: 'OPEN',
-                    startedAt: new Date(),
-                },
-            });
-            isNewConversation = true;
-        } else if (conversation.status === 'CLOSED') {
-            conversation = await prisma.conversation.update({
-                where: { id: conversation.id },
-                data: { status: 'OPEN', closedAt: null, startedAt: new Date() },
-            });
-            isNewConversation = true;
-        }
-
-        // Process Messages (INBOUND and OUTBOUND from phone)
-        for (const msg of parsed.messages) {
-            if (msg.direction === 'OUTBOUND') {
-                // Message sent from the phone (fromMe) — deduplicate by waMessageId
-                if (!msg.waMessageId) continue;
-                const existing = await prisma.message.findFirst({
-                    where: { companyId, conversationId: conversation.id, waMessageId: msg.waMessageId },
-                });
-                if (existing) continue;
-
-                const message = await prisma.message.create({
-                    data: {
-                        companyId,
-                        conversationId: conversation.id,
-                        direction: 'OUTBOUND',
-                        type: msg.type,
-                        body: msg.body,
-                        mediaUrl: msg.mediaUrl,
-                        waMessageId: msg.waMessageId,
-                    },
-                });
-                getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
-                continue;
-            }
-
-            // INBOUND
-            let inboundEvent;
-            try {
-                inboundEvent = await prisma.whatsAppInboundEvent.create({
-                    data: {
-                        companyId,
-                        provider: currentWhatsAppProvider(),
-                        providerMessageId: msg.waMessageId || stableInboundMessageId(payload, phone, msg),
-                        fromPhone: phone,
-                        rawPayload: payload,
-                    },
-                });
-            } catch (error: any) {
-                if (error?.code === 'P2002') {
-                    continue;
-                }
-                throw error;
-            }
-
-            const message = await prisma.message.create({
-                data: {
-                    companyId,
-                    conversationId: conversation.id,
-                    direction: 'INBOUND',
-                    type: msg.type,
-                    body: msg.body,
-                    mediaUrl: msg.mediaUrl,
-                    waMessageId: msg.waMessageId,
-                },
-            });
-
-            getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
-            await prisma.whatsAppInboundEvent.update({
-                where: { id: inboundEvent.id },
-                data: { processedAt: new Date() },
-            });
-        }
-
-        // Update conversation lastMessageAt
-        const updatedConversation = await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { lastMessageAt: new Date() },
-            include: {
-                contact: true,
-                assignedUser: { select: { id: true, name: true, email: true } },
-                department: { select: { id: true, name: true } },
-                messages: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 1,
-                },
-            }
-        });
-
-        emitToCompany(companyId, 'conversation:updated', updatedConversation);
-        if (isNewConversation) {
-            emitToCompany(companyId, 'conversation:new', updatedConversation);
-        }
-
-        // Auto Messages Logic for New Conversations
-        if (isNewConversation) {
-            try {
-                const settings = await getCurrentSettings(companyId);
-                const autoMessageText = settings.welcomeMessage;
-
-                if (autoMessageText) {
-                    // Save system message
-                    const systemMsg = await prisma.message.create({
-                        data: {
-                            companyId,
-                            conversationId: conversation.id,
-                            direction: 'SYSTEM',
-                            type: 'TEXT',
-                            body: autoMessageText,
-                        }
-                    });
-
-                    // Emit to frontend (so the agent sees the system message)
-                    getIO().to(`conversation:${conversation.id}`).emit('message:new', systemMsg);
-
-                    await sendTextWithOutbox({
-                        companyId,
-                        conversationId: conversation.id,
-                        messageId: systemMsg.id,
-                        toPhone: phone,
-                        body: autoMessageText,
-                    });
-                }
-            } catch (err) {
-                console.error("Failed to send auto message:", err);
-                // We don't throw to avoid breaking the webhook flow
-            }
-        }
-
+        // Responde 200 imediatamente — Evolution não precisa aguardar o processamento
         res.status(200).json({ ok: true });
+
+        if (parsed.messages.length === 0) return;
+
+        // Todo o processamento em background — não bloqueia a resposta
+        setImmediate(async () => {
+            try {
+                await processWebhookPayload(parsed, payload);
+            } catch (err) {
+                console.error('[SIGMA] Erro ao processar webhook em background:', err);
+            }
+        });
     } catch (error) {
         console.error('Error processing WhatsApp webhook:', error);
         res.status(500).json({ error: 'Internal server error while processing webhook' });

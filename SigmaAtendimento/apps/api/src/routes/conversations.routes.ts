@@ -5,7 +5,6 @@ import { getWhatsAppProvider } from '../whatsapp';
 import { getIO, emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { companyScope, getCompanyId } from '../lib/tenant';
-import { sendTextWithOutbox } from '../services/whatsappOutbox.service';
 import { rateLimit } from '../middlewares/rateLimit.middleware';
 
 const router = Router();
@@ -29,6 +28,14 @@ router.get('/', async (req: Request, res: Response) => {
                 messages: {
                     orderBy: { createdAt: 'desc' },
                     take: 1, // Get the last message for preview
+                    select: {
+                        id: true,
+                        direction: true,
+                        type: true,
+                        body: true,
+                        createdAt: true,
+                        waMessageId: true,
+                    },
                 },
             },
         });
@@ -102,6 +109,14 @@ router.post('/start', async (req: Request, res: Response) => {
                 messages: {
                     orderBy: { createdAt: 'desc' },
                     take: 1,
+                    select: {
+                        id: true,
+                        direction: true,
+                        type: true,
+                        body: true,
+                        createdAt: true,
+                        waMessageId: true,
+                    },
                 },
             },
         });
@@ -125,6 +140,14 @@ router.post('/start', async (req: Request, res: Response) => {
                 messages: {
                     orderBy: { createdAt: 'desc' },
                     take: 1,
+                    select: {
+                        id: true,
+                        direction: true,
+                        type: true,
+                        body: true,
+                        createdAt: true,
+                        waMessageId: true,
+                    },
                 },
             },
         });
@@ -206,6 +229,14 @@ router.post('/:id/take', async (req: Request, res: Response) => {
                 messages: {
                     orderBy: { createdAt: 'desc' },
                     take: 1,
+                    select: {
+                        id: true,
+                        direction: true,
+                        type: true,
+                        body: true,
+                        createdAt: true,
+                        waMessageId: true,
+                    },
                 },
             }
         });
@@ -266,6 +297,14 @@ router.post('/:id/transfer', async (req: Request, res: Response) => {
                 messages: {
                     orderBy: { createdAt: 'desc' },
                     take: 1,
+                    select: {
+                        id: true,
+                        direction: true,
+                        type: true,
+                        body: true,
+                        createdAt: true,
+                        waMessageId: true,
+                    },
                 },
             }
         });
@@ -289,68 +328,64 @@ router.post('/:id/messages', rateLimit(60_000, 60), async (req: Request, res: Re
             return res.status(400).json({ error: 'Missing message body' });
         }
 
-        const conversation = await prisma.conversation.findFirst({
-            where: { id, companyId },
-            include: { contact: true },
-        });
+        // Leituras em paralelo — economiza ~150ms vs sequencial
+        const [conversation, senderSignatures] = await Promise.all([
+            prisma.conversation.findFirst({ where: { id, companyId }, include: { contact: true } }),
+            userId
+                ? prisma.$queryRawUnsafe<Array<{ messageSignature: string | null }>>(
+                    'SELECT message_signature as "messageSignature" FROM "User" WHERE id = $1 AND company_id = $2 LIMIT 1',
+                    userId,
+                    companyId
+                )
+                : Promise.resolve([] as Array<{ messageSignature: string | null }>),
+        ]);
 
         if (!conversation) {
             return res.status(404).json({ error: 'Conversation not found' });
         }
 
-        const senderSignatures = userId
-            ? await prisma.$queryRawUnsafe<Array<{ messageSignature: string | null }>>(
-                'SELECT message_signature as "messageSignature" FROM "User" WHERE id = $1 AND company_id = $2 LIMIT 1',
-                userId,
-                companyId
-            )
-            : [];
         const signature = senderSignatures[0]?.messageSignature?.trim();
-        const messageBody = signature ? `${signature}\n${body}` : body;
+        const messageBody = signature ? `*${signature}:*\n${body}` : body;
 
-        const sendResult = await sendTextWithOutbox({
-            companyId,
-            conversationId: id,
-            toPhone: conversation.contact.phone,
-            body: messageBody,
-        });
-
-        // Save to DB
-        const message = await prisma.message.create({
-            data: {
-                companyId,
-                conversationId: id,
-                direction: MessageDirection.OUTBOUND,
-                type: MessageType.TEXT,
-                body: messageBody,
-                waMessageId: sendResult.waMessageId,
-                userId,
-            },
-        });
-        await prisma.whatsAppOutbox.update({
-            where: { id: sendResult.outboxId },
-            data: { messageId: message.id },
-        });
-
-        // Update conversation
-        const updatedConversation = await prisma.conversation.update({
-            where: { id },
-            data: { lastMessageAt: new Date() },
-            include: {
-                contact: true,
-                assignedUser: { select: { id: true, name: true, email: true } },
-                department: { select: { id: true, name: true } },
-                messages: {
-                    orderBy: { createdAt: 'desc' },
-                    take: 1,
+        // Persiste mensagem + atualiza conversa em paralelo
+        const [message] = await Promise.all([
+            prisma.message.create({
+                data: {
+                    companyId,
+                    conversationId: id,
+                    direction: MessageDirection.OUTBOUND,
+                    type: MessageType.TEXT,
+                    body: messageBody,
+                    userId,
                 },
+            }),
+            prisma.conversation.update({ where: { id }, data: { lastMessageAt: new Date() } }),
+        ]);
+
+        // Responde e emite socket imediatamente — mensagem aparece na tela sem esperar a Evolution
+        getIO().to(`conversation:${id}`).emit('message:new', message);
+        emitToCompany(companyId, 'conversation:updated', { id, lastMessageAt: new Date() });
+        res.status(201).json(message);
+
+        // Envio via WhatsApp em background — não bloqueia a resposta ao cliente
+        setImmediate(async () => {
+            try {
+                const result = await getWhatsAppProvider().sendText({
+                    to: conversation.contact.phone,
+                    body: messageBody,
+                });
+                await prisma.message.update({
+                    where: { id: message.id },
+                    data: { waMessageId: result.waMessageId },
+                });
+                getIO().to(`conversation:${id}`).emit('message:updated', {
+                    id: message.id,
+                    waMessageId: result.waMessageId,
+                });
+            } catch (err) {
+                console.error('[SIGMA] Falha ao enviar via WhatsApp:', err);
             }
         });
-
-        getIO().to(`conversation:${id}`).emit('message:new', message);
-        emitToCompany(companyId, 'conversation:updated', updatedConversation);
-
-        res.status(201).json(message);
     } catch (error) {
         console.error('Error sending message:', error);
         const message = error instanceof Error ? error.message : 'Erro ao enviar mensagem';

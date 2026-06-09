@@ -390,10 +390,41 @@ export function ChatWindow({
                                                 </p>
                                             )}
 
-                                            {/* Corpo da mensagem */}
-                                            <p className="whitespace-pre-wrap leading-snug text-foreground">
-                                                {msg.body || ''}
-                                            </p>
+                                            {/* Mídia */}
+                                            {msg.mediaUrl && msg.type === 'IMAGE' && (
+                                                <a href={msg.mediaUrl} target="_blank" rel="noreferrer" className="block mb-1">
+                                                    <img
+                                                        src={msg.mediaUrl}
+                                                        alt={msg.body || 'imagem'}
+                                                        className="max-w-full rounded-lg max-h-64 object-cover cursor-zoom-in"
+                                                        loading="lazy"
+                                                    />
+                                                </a>
+                                            )}
+                                            {msg.mediaUrl && msg.type === 'AUDIO' && (
+                                                <audio controls src={msg.mediaUrl} className="w-full mb-1 max-w-xs" />
+                                            )}
+                                            {msg.mediaUrl && msg.type === 'VIDEO' && (
+                                                <video controls src={msg.mediaUrl} className="max-w-full rounded-lg max-h-64 mb-1" />
+                                            )}
+                                            {msg.mediaUrl && msg.type === 'DOCUMENT' && (
+                                                <a
+                                                    href={msg.mediaUrl}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    download
+                                                    className="flex items-center gap-2 mb-1 text-xs underline opacity-80 hover:opacity-100"
+                                                >
+                                                    📎 {msg.body || 'Documento'}
+                                                </a>
+                                            )}
+
+                                            {/* Corpo da mensagem (texto / legenda) */}
+                                            {(msg.body || !msg.mediaUrl) && (
+                                                <p className="whitespace-pre-wrap leading-snug text-foreground">
+                                                    {msg.body || ''}
+                                                </p>
+                                            )}
 
                                             {/* Horário — canto inferior direito, dentro da bolha */}
                                             <span

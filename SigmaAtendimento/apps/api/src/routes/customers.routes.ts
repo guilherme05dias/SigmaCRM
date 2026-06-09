@@ -14,6 +14,7 @@ const CustomerCreateSchema = z.object({
     segment: z.string().trim().optional().nullable(),
     city: z.string().trim().optional().nullable(),
     status: z.nativeEnum(CustomerStatus).optional(),
+    systems: z.string().trim().optional().nullable(),
     notes: z.string().trim().optional().nullable(),
 });
 
@@ -51,6 +52,7 @@ function customerData(input: z.infer<typeof CustomerUpdateSchema>) {
     if (input.segment !== undefined) data.segment = emptyToNull(input.segment);
     if (input.city !== undefined) data.city = emptyToNull(input.city);
     if (input.status !== undefined) data.status = input.status;
+    if (input.systems !== undefined) data.systems = emptyToNull(input.systems);
     if (input.notes !== undefined) data.notes = emptyToNull(input.notes);
     return data;
 }
@@ -123,6 +125,7 @@ router.post('/', async (req, res) => {
                 segment: emptyToNull(parsed.data.segment),
                 city: emptyToNull(parsed.data.city),
                 status: parsed.data.status ?? CustomerStatus.ATIVO,
+                systems: emptyToNull(parsed.data.systems),
                 notes: emptyToNull(parsed.data.notes),
             },
         });

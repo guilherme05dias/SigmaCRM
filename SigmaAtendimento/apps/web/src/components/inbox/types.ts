@@ -4,6 +4,8 @@ export interface Message {
     direction: 'INBOUND' | 'OUTBOUND' | 'SYSTEM';
     type: 'TEXT' | 'IMAGE' | 'AUDIO' | 'VIDEO' | 'DOCUMENT';
     body: string | null;
+    mediaUrl?: string | null;
+    waMessageId?: string | null;
     createdAt: string;
     user?: {
         id: string;
