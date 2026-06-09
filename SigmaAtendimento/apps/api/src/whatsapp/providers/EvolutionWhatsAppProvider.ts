@@ -204,7 +204,7 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
             return { contact: { phone: "" }, messages: [] };
         }
 
-        const data = payload?.data?.message || payload?.data;
+        const data = payload?.data;
         if (!data || !data.key) {
             return { contact: { phone: "" }, messages: [] };
         }
