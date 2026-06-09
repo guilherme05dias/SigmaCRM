@@ -282,6 +282,33 @@ export class EvolutionWhatsAppProvider implements IWhatsAppProvider {
             }
         }
 
+        if (!mediaUrl && type !== "TEXT") {
+            try {
+                const mediaRes = await fetch(`${this.baseUrl}/chat/getBase64FromMediaMessage/${encodeURIComponent(this.resolveSessionId())}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', apikey: this.apiKey },
+                    body: JSON.stringify({ message: data })
+                });
+
+                if (mediaRes.ok) {
+                    const mediaData = await this.readJson<any>(mediaRes);
+                    if (mediaData?.base64) {
+                        let mime = 'application/octet-stream';
+                        if (type === 'IMAGE') mime = msgObj.imageMessage?.mimetype || 'image/jpeg';
+                        else if (type === 'VIDEO') mime = msgObj.videoMessage?.mimetype || 'video/mp4';
+                        else if (type === 'AUDIO') mime = msgObj.audioMessage?.mimetype || 'audio/ogg';
+                        else if (type === 'DOCUMENT') mime = msgObj.documentMessage?.mimetype || 'application/octet-stream';
+                        
+                        let b64 = mediaData.base64;
+                        if (!b64.startsWith('data:')) b64 = `data:${mime};base64,${b64}`;
+                        mediaUrl = b64;
+                    }
+                }
+            } catch (err) {
+                console.error("[Evolution] Falha ao baixar mídia on-demand:", err);
+            }
+        }
+
         if (!body && !mediaUrl && type === "TEXT") {
             return { contact: { phone: from, name: senderName }, messages: [] };
         }
