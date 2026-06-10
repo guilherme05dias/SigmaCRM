@@ -1,5 +1,6 @@
 node_modules/
 
 src/sessions
+src/media
 .wwebjs_cache
 .cache

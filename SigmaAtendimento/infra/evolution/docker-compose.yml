@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────
+# Evolution API (Baileys) — stack local para TESTE
+# Subir:  docker compose -f infra/evolution/docker-compose.yml up -d
+# Painel: http://localhost:8080/manager   (use a EVOLUTION_API_KEY)
+#
+# Valores lidos de infra/evolution/.env (copie de .env.example).
+# O volume evolution_instances guarda a sessão do QR — NÃO apague,
+# senão precisa escanear o QR de novo.
+# ─────────────────────────────────────────────────────────────
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_URL=http://localhost:8080
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-sigma-evolution-local-dev}
+      # Banco (sessões + dados)
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://evo:evo@postgres:5432/evolution
+      - DATABASE_CONNECTION_CLIENT_NAME=evolution
+      - DATABASE_SAVE_DATA_INSTANCE=true
+      - DATABASE_SAVE_DATA_NEW_MESSAGE=true
+      - DATABASE_SAVE_MESSAGE_UPDATE=true
+      - DATABASE_SAVE_DATA_CONTACTS=true
+      - DATABASE_SAVE_DATA_CHATS=true
+      # Cache
+      - CACHE_REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://redis:6379
+      - CACHE_REDIS_PREFIX_KEY=evolution
+      - CACHE_LOCAL_ENABLED=false
+      # Não apagar a instância ao reiniciar
+      - DEL_INSTANCE=false
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=evo
+      - POSTGRES_PASSWORD=evo
+      - POSTGRES_DB=evolution
+    volumes:
+      - evolution_pg:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - evolution_redis:/data
+
+volumes:
+  evolution_instances:
+  evolution_pg:
+  evolution_redis:
