@@ -7,31 +7,36 @@ import { verifyPassword, isHashed, hashPassword } from '../lib/password';
 const router = Router();
 
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'sigma-secret-dev-key';
+import { env } from '../config/env';
+import { rateLimit } from '../middlewares/rateLimit.middleware';
 
 const LoginSchema = z.object({
     email: z.string().email(),
     password: z.string().min(6),
 });
 
-router.post('/login', async (req, res) => {
+const invalidCredentials = { error: 'E-mail ou senha inválidos' };
+const DUMMY_PASSWORD_HASH = '$2b$10$7EqJtq98hPqEX7fNZaFWoO5uUEG8VQw4KpVbDdd4VQJHjKcQb1j6K';
+
+const loginIpLimit = rateLimit(15 * 60_000, 20, (req) => `login:ip:${req.ip || 'unknown'}`);
+const loginIdentityLimit = rateLimit(15 * 60_000, 8, (req) => {
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : 'invalid';
+    return `login:identity:${email}`;
+});
+
+router.post('/login', loginIpLimit, loginIdentityLimit, async (req, res) => {
     try {
-        const { email, password } = LoginSchema.parse(req.body);
+        const { email: rawEmail, password } = LoginSchema.parse(req.body);
+        const email = rawEmail.trim().toLowerCase();
 
         // Auth Simples para V1 Fundação
         const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) {
-            console.log('Login failed: user not found', email);
-            return res.status(401).json({ error: 'Usuário não encontrado' });
-        }
-        if (!user.active) {
-            return res.status(403).json({ error: 'Usuário inativo' });
-        }
+        // Faz uma comparação bcrypt mesmo quando o usuário não existe,
+        // reduzindo diferenças de tempo que facilitariam enumeração de contas.
         // C1: bcrypt + migração preguiçosa de senhas legadas em texto puro.
-        const passwordOk = await verifyPassword(password, user.passwordHash);
-        if (!passwordOk) {
-            return res.status(401).json({ error: 'Senha incorreta' });
+        const passwordOk = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+        if (!user || !user.active || !passwordOk) {
+            return res.status(401).json(invalidCredentials);
         }
         // Upgrade preguiçoso: se a senha ainda estava em texto puro, re-hasheia agora.
         if (!isHashed(user.passwordHash)) {
@@ -49,7 +54,7 @@ router.post('/login', async (req, res) => {
                 name: user.name,
                 email: user.email,
             },
-            JWT_SECRET,
+            env.jwtSecret,
             { expiresIn: '1d' }
         );
 
@@ -78,6 +83,8 @@ router.get('/me', authMiddleware, async (req, res) => {
                 role: true,
                 companyId: true,
                 departmentId: true,
+                messageSignature: true,
+                department: { select: { name: true } },
                 active: true,
             },
         });

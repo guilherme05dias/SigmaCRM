@@ -1,7 +1,5 @@
-// Sigma (Atendimento + CRM) — schema convergente (M2)
-// Decisões: docs/ARCHITECTURE_DECISIONS.md (ADR-02..07).
-// Padrão camelCase (ADR-05). Multi-tenant: companyId em toda tabela de negócio (ADR-02).
-// Após editar: rode `npx prisma format && npx prisma validate` antes do migrate.
+// Sigma Atendimento + CRM
+// App ativo: SigmaAtendimento
 
 generator client {
   provider = "prisma-client-js"
@@ -13,7 +11,12 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-// ─────────────────────────────── ENUMS ───────────────────────────────
+enum UserRole {
+  ADMIN
+  SUPERVISOR
+  ATTENDANT
+  TECHNICIAN
+}
 
 enum MessageDirection {
   INBOUND
@@ -68,6 +71,14 @@ enum ServiceType {
   HIBRIDO
 }
 
+enum FieldVisitStatus {
+  PENDING
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+}
+
 enum CustomerStatus {
   ATIVO
   NEGOCIACAO
@@ -87,6 +98,7 @@ enum TimelineType {
 enum WhatsAppProvider {
   WAHA
   META
+  UAZAPI
   MOCK
 }
 
@@ -96,42 +108,58 @@ enum OutboxStatus {
   FAILED
 }
 
-// ─────────────────────────────── TENANT / EQUIPE ───────────────────────────────
+enum NotificationType {
+  FIELD_VISIT_ASSIGNED
+  FIELD_VISIT_SCHEDULE_CHANGED
+  FIELD_VISIT_STATUS_CHANGED
+  TICKET_ASSIGNED
+  CONVERSATION_TRANSFERRED
+  CONVERSATION_FALLBACK_ASSIGNED
+  CONVERSATION_QUEUED
+}
 
 model Company {
-  id        String   @id @default(uuid())
-  name      String   @map("nome")
-  legalName String?  @map("razao_social")
-  active    Boolean  @default(true) @map("ativo")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                  String   @id @default(uuid())
+  name                String   @map("nome")
+  legalName           String?  @map("razao_social")
+  defaultTechnicianId String?  @map("default_technician_id")
+  defaultTechnician   User?    @relation("CompanyDefaultTechnician", fields: [defaultTechnicianId], references: [id], onDelete: SetNull)
+  active              Boolean  @default(true) @map("ativo")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  users       User[]
-  departments Department[]
-  settings    Settings?
+  users         User[]         @relation("CompanyUsers")
+  departments   Department[]
+  serviceTopics ServiceTopic[]
+  customerBusinesses CustomerBusiness[]
+  conversationReports ConversationReport[]
+  settings      Settings?
 }
 
 model User {
-  id           String      @id @default(uuid())
-  companyId    String?     @map("company_id")
-  company      Company?    @relation(fields: [companyId], references: [id])
-  name         String      @map("nome")
-  email        String      @unique
-  passwordHash String      @map("password_hash")
-  role         String      @default("AGENT") // ADMIN, SUPERVISOR, AGENT
-  specialty    String? // técnico = User com especialidade (ADR-03)
-  messageSignature String? @map("message_signature")
-  departmentId String?     @map("department_id")
-  department   Department? @relation(fields: [departmentId], references: [id])
-  active       Boolean     @default(true) @map("ativo")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  id               String      @id @default(uuid())
+  companyId        String?     @map("company_id")
+  company          Company?    @relation("CompanyUsers", fields: [companyId], references: [id])
+  name             String      @map("nome")
+  email            String      @unique
+  passwordHash     String      @map("password_hash")
+  role             UserRole    @default(ATTENDANT)
+  specialty        String?
+  messageSignature String?     @map("message_signature")
+  departmentId     String?     @map("department_id")
+  department       Department? @relation(fields: [departmentId], references: [id])
+  active           Boolean     @default(true) @map("ativo")
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
 
-  conversations   Conversation[]       @relation("ConversationAssignee")
-  messages        Message[]
-  ticketsAssigned Ticket[]             @relation("TicketAssignee")
-  fieldServices   TicketFieldService[] @relation("FieldTechnician")
-  timelineEvents  TicketTimeline[]     @relation("TimelineActor")
+  conversations             Conversation[]             @relation("ConversationAssignee")
+  messages                  Message[]
+  ticketsAssigned           Ticket[]                   @relation("TicketAssignee")
+  fieldServices             TicketFieldService[]       @relation("FieldTechnician")
+  fieldVisitScheduleChanges FieldVisitScheduleChange[] @relation("FieldVisitScheduleChanger")
+  timelineEvents            TicketTimeline[]           @relation("TimelineActor")
+  defaultForCompanies       Company[]                  @relation("CompanyDefaultTechnician")
+  notifications             Notification[]
 
   @@index([companyId])
 }
@@ -153,36 +181,71 @@ model Department {
   @@index([companyId])
 }
 
+model ServiceTopic {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  company     Company  @relation(fields: [companyId], references: [id])
+  name        String   @map("nome")
+  description String?  @map("descricao")
+  active      Boolean  @default(true) @map("ativo")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  conversations Conversation[]
+  tickets       Ticket[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
 model Settings {
   id             String   @id @default(uuid())
   companyId      String   @unique @map("company_id")
   company        Company  @relation(fields: [companyId], references: [id])
-  businessHours  Json // array de 7 dias: [{ status, startTime, endTime }]
+  businessHours  Json
   welcomeMessage String?
   awayMessage    String?
   closingMessage String?
+  externalServiceGroupId   String? @map("external_service_group_id")
+  externalServiceGroupName String? @map("external_service_group_name")
   updatedAt      DateTime @updatedAt @map("updated_at")
 }
-
-// ─────────────────────────────── CRM ───────────────────────────────
 
 model Customer {
   id        String         @id @default(uuid())
   companyId String
   name      String
-  document  String? // CNPJ/CPF
+  document  String?
   segment   String?
   city      String?
   status    CustomerStatus @default(ATIVO)
-  systems   String? // sistemas/produtos usados pelo cliente
+  systems   String?
   notes     String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
   contacts Contact[]
+  businesses CustomerBusiness[]
   tickets  Ticket[]
 
   @@index([companyId])
+}
+
+model CustomerBusiness {
+  id         String   @id @default(uuid())
+  companyId  String   @map("company_id")
+  company    Company  @relation(fields: [companyId], references: [id])
+  customerId String   @map("customer_id")
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  name       String
+  cnpj       String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  contacts Contact[]
+
+  @@unique([companyId, cnpj])
+  @@index([customerId])
 }
 
 model Contact {
@@ -190,37 +253,60 @@ model Contact {
   companyId  String?
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id])
+  businessId String?   @map("business_id")
+  business   CustomerBusiness? @relation(fields: [businessId], references: [id], onDelete: SetNull)
   name       String?
   phone      String
   email      String?
   role       String?
   notes      String?
+  avatarUrl  String?   @map("avatar_url")
+  isWhatsAppGroup        Boolean @default(false) @map("is_whatsapp_group")
+  welcomeMessageEnabled  Boolean @default(true)  @map("welcome_message_enabled")
+  includeInServiceReports Boolean @default(true) @map("include_in_service_reports")
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
   conversations Conversation[]
   tickets       Ticket[]
 
-  @@index([companyId])
   @@unique([companyId, phone])
+  @@index([companyId])
+  @@index([businessId])
 }
 
-// ─────────────────────────────── ATENDIMENTO ───────────────────────────────
-
 model Conversation {
-  id             String             @id @default(uuid())
-  companyId      String?
-  contactId      String
-  contact        Contact            @relation(fields: [contactId], references: [id])
-  status         ConversationStatus @default(OPEN)
-  assignedUserId String?
-  assignedUser   User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id])
-  departmentId   String?
-  department     Department?        @relation(fields: [departmentId], references: [id])
+  id                    String             @id @default(uuid())
+  companyId             String?
+  contactId             String
+  contact               Contact            @relation(fields: [contactId], references: [id])
+  status                ConversationStatus @default(OPEN)
+  assignedUserId        String?
+  assignedUser          User?              @relation("ConversationAssignee", fields: [assignedUserId], references: [id])
+  departmentId          String?
+  department            Department?        @relation(fields: [departmentId], references: [id])
+  serviceTopicId        String?
+  serviceTopic          ServiceTopic?      @relation(fields: [serviceTopicId], references: [id])
+  otherTopicDescription String?
 
+  queuedAt               DateTime?
+  departmentSelectedAt   DateTime?
+  assignedAt             DateTime?
+  fallbackAssignedAt     DateTime?
+  queueNotifiedAt        DateTime?
   lastMessageAt          DateTime?
   startedAt              DateTime?
   closedAt               DateTime?
+  closeResult            String?
+  closeSummary           String?
+  closeNotes             String?
+  lastWelcomeSentAt      DateTime?
+  lastAwaySentAt         DateTime?           @db.Timestamptz(3)
+  ratingRequestedAt      DateTime?
+  rating                 Int?
+  ratedAt                DateTime?
+  unreadCount            Int      @default(0) @map("unread_count")
+  fieldServiceRequired   Boolean   @default(false)
   isTransferred          Boolean   @default(false)
   totalHandleTimeSeconds Int?
   createdAt              DateTime  @default(now())
@@ -228,50 +314,84 @@ model Conversation {
 
   messages Message[]
   tickets  Ticket[]
+  report   ConversationReport?
+  inboundEvents WhatsAppInboundEvent[]
 
   @@index([companyId])
   @@index([contactId])
+  @@index([serviceTopicId])
+}
+
+model ConversationReport {
+  id             String       @id @default(uuid())
+  companyId      String       @map("company_id")
+  company        Company      @relation(fields: [companyId], references: [id])
+  conversationId String       @unique @map("conversation_id")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customerName   String       @map("customer_name")
+  businessName   String?      @map("business_name")
+  businessCnpj   String?      @map("business_cnpj")
+  systemName     String       @map("system_name")
+  summary        String
+  rating         Int?
+  observation    String?
+  closedAt       DateTime     @map("closed_at")
+  ratedAt        DateTime?    @map("rated_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  @@index([companyId, closedAt])
 }
 
 model Message {
-  id             String           @id @default(uuid())
-  companyId      String?
-  conversationId String
-  conversation   Conversation     @relation(fields: [conversationId], references: [id])
-  direction      MessageDirection
-  type           MessageType
-  body           String?
-  mediaUrl       String?
-  waMessageId    String?
-  userId         String?
-  user           User?            @relation(fields: [userId], references: [id])
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id               String           @id @default(uuid())
+  companyId        String?
+  conversationId   String
+  conversation     Conversation     @relation(fields: [conversationId], references: [id])
+  direction        MessageDirection
+  type             MessageType
+  body             String?
+  mediaUrl         String?
+  waMessageId      String?
+  userId           String?
+  user             User?            @relation(fields: [userId], references: [id])
+  replyToMessageId String?
+  replyToMessage   Message?         @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies          Message[]        @relation("MessageReplies")
+  editedAt         DateTime?        @map("edited_at")
+  deletedAt        DateTime?        @map("deleted_at")
+  deletedByCustomer Boolean         @default(false) @map("deleted_by_customer")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   @@index([companyId])
   @@index([conversationId])
+  @@index([replyToMessageId])
 }
 
 model Ticket {
-  id             String         @id @default(uuid())
-  companyId      String?
-  protocol       String? // ATD{YYYYMMDD}-{seq:03d} — ADR-07
-  contactId      String
-  contact        Contact        @relation(fields: [contactId], references: [id])
-  customerId     String?
-  customer       Customer?      @relation(fields: [customerId], references: [id])
-  conversationId String?
-  conversation   Conversation?  @relation(fields: [conversationId], references: [id])
-  title          String
-  description    String?
-  category       String?
-  channel        TicketChannel  @default(WHATSAPP)
-  priority       TicketPriority @default(MEDIUM)
-  status         TicketStatus   @default(NEW)
+  id                    String         @id @default(uuid())
+  companyId             String?
+  protocol              String?
+  contactId             String
+  contact               Contact        @relation(fields: [contactId], references: [id])
+  customerId            String?
+  customer              Customer?      @relation(fields: [customerId], references: [id])
+  conversationId        String?
+  conversation          Conversation?  @relation(fields: [conversationId], references: [id])
+  title                 String
+  description           String?
+  category              String?
+  serviceTopicId        String?
+  serviceTopic          ServiceTopic?  @relation(fields: [serviceTopicId], references: [id])
+  otherTopicDescription String?
+  channel               TicketChannel  @default(WHATSAPP)
+  priority              TicketPriority @default(MEDIUM)
+  status                TicketStatus   @default(NEW)
 
-  assignedUserId String? // atendente responsável (ADR-03)
+  assignedUserId String?
   assignedUser   User?       @relation("TicketAssignee", fields: [assignedUserId], references: [id])
-  departmentId   String? // fila/departamento
+  departmentId   String?
   department     Department? @relation(fields: [departmentId], references: [id])
 
   notesInternal String?
@@ -288,24 +408,29 @@ model Ticket {
   @@unique([companyId, protocol])
   @@index([companyId])
   @@index([status])
+  @@index([serviceTopicId])
 }
 
 model TicketFieldService {
-  id           String      @id @default(uuid())
-  companyId    String?
-  ticketId     String      @unique
-  ticket       Ticket      @relation(fields: [ticketId], references: [id])
-  technicianId String? // técnico da execução (ADR-03)
-  technician   User?       @relation("FieldTechnician", fields: [technicianId], references: [id])
-  serviceType  ServiceType @default(REMOTO)
-  equipment    String?
-  scheduledAt  DateTime?
-  startedAt    DateTime?
-  finishedAt   DateTime?
-  hoursSpent   Float?
-  resolution   String?
+  id                 String           @id @default(uuid())
+  companyId          String?
+  ticketId           String           @unique
+  ticket             Ticket           @relation(fields: [ticketId], references: [id])
+  technicianId       String?
+  technician         User?            @relation("FieldTechnician", fields: [technicianId], references: [id])
+  serviceType        ServiceType      @default(REMOTO)
+  status             FieldVisitStatus @default(PENDING)
+  equipment          String?
+  scheduledAt        DateTime?
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  hoursSpent         Float?
+  resolution         String?
+  result             String?
+  serviceDescription String?
+  materialsUsed      String?
+  photos             Json?
 
-  // específicos de visita presencial
   onSiteRequired   Boolean   @default(false)
   visitAddress     String?
   visitWindowStart DateTime?
@@ -314,7 +439,26 @@ model TicketFieldService {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  scheduleChanges FieldVisitScheduleChange[]
+
   @@index([companyId])
+  @@index([status])
+}
+
+model FieldVisitScheduleChange {
+  id                  String             @id @default(uuid())
+  companyId           String?            @map("company_id")
+  fieldServiceId      String             @map("field_service_id")
+  fieldService        TicketFieldService @relation(fields: [fieldServiceId], references: [id], onDelete: Cascade)
+  changedByUserId     String?            @map("changed_by_user_id")
+  changedByUser       User?              @relation("FieldVisitScheduleChanger", fields: [changedByUserId], references: [id])
+  previousScheduledAt DateTime?          @map("previous_scheduled_at")
+  newScheduledAt      DateTime?          @map("new_scheduled_at")
+  reason              String
+  createdAt           DateTime           @default(now()) @map("created_at")
+
+  @@index([companyId])
+  @@index([fieldServiceId])
 }
 
 model TicketEvaluation {
@@ -322,7 +466,7 @@ model TicketEvaluation {
   companyId String?
   ticketId  String   @unique
   ticket    Ticket   @relation(fields: [ticketId], references: [id])
-  rating    Int // 1..5 (CSAT)
+  rating    Int
   comment   String?
   createdAt DateTime @default(now())
 
@@ -344,9 +488,24 @@ model TicketTimeline {
   @@index([ticketId])
 }
 
-// ─────────────────────────────── PROTOCOLO / WHATSAPP ───────────────────────────────
+model Notification {
+  id        String           @id @default(uuid())
+  companyId String?          @map("company_id")
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String?
+  link      String?
+  payload   Json?
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
 
-// Contador transacional p/ protocolo: scope = "ATD-" + YYYYMMDD (reset diário) — ADR-07
+  @@index([companyId])
+  @@index([userId, readAt, createdAt])
+  @@index([companyId, userId, readAt])
+}
+
 model Counter {
   companyId String
   scope     String
@@ -361,14 +520,17 @@ model WhatsAppInboundEvent {
   companyId         String?
   provider          WhatsAppProvider @default(WAHA)
   providerMessageId String?
-  phoneNumberId     String? // futuro Meta Cloud / multi-número
+  phoneNumberId     String?
   fromPhone         String?
+  conversationId    String?          @map("conversation_id")
+  conversation      Conversation?    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   rawPayload        Json
   processedAt       DateTime?
   createdAt         DateTime         @default(now())
 
-  @@unique([provider, providerMessageId]) // idempotência
+  @@unique([provider, providerMessageId])
   @@index([companyId])
+  @@index([conversationId])
 }
 
 model WhatsAppOutbox {

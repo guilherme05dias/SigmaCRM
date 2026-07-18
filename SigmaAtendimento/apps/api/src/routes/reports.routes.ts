@@ -1,44 +1,56 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { canViewAll } from '../middlewares/authorization.middleware';
 import { getCompanyId } from '../lib/tenant';
-import { z } from 'zod';
+import { formatContactDisplayName } from '../lib/contactDisplayName';
 
 const router = Router();
-
-const ReportQuerySchema = z.object({
-    range: z.enum(['1d', '7d', '15d', '30d', '60d', '90d']).default('7d')
-});
+// Marco inicial fixo da nova operação, no horário de São Paulo (UTC-03:00).
+const REPORT_START_AT = new Date('2026-07-14T08:00:00-03:00');
 
 router.use(authMiddleware);
 
+router.get('/records', async (req: Request, res: Response) => {
+    try {
+        const companyId = getCompanyId(req);
+        const userId = req.user?.id;
+        const seesAll = canViewAll(req.user?.role);
+        const take = Math.max(1, Math.min(Number(req.query.take || 100), 500));
+        const records = await prisma.conversationReport.findMany({
+            where: {
+                companyId,
+                closedAt: { gte: REPORT_START_AT },
+                ...(seesAll || !userId
+                    ? {}
+                    : { conversation: { is: { assignedUserId: userId } } }),
+            },
+            orderBy: { closedAt: 'desc' },
+            take,
+            select: {
+                id: true,
+                customerName: true,
+                businessName: true,
+                businessCnpj: true,
+                systemName: true,
+                summary: true,
+                rating: true,
+                observation: true,
+                closedAt: true,
+            },
+        });
+
+        res.json({ records });
+    } catch (error) {
+        console.error('Error listing conversation reports:', error);
+        res.status(500).json({ error: 'Erro ao listar registros de atendimento' });
+    }
+});
+
 router.get('/summary', async (req: Request, res: Response) => {
     try {
-        const query = ReportQuerySchema.safeParse(req.query);
-        if (!query.success) {
-            return res.status(400).json({ error: 'Parâmetro range inválido' });
-        }
-        const range = query.data.range;
-
-        let days = 7;
-
-        switch (range) {
-            case '1d': days = 1; break;
-            case '7d': days = 7; break;
-            case '15d': days = 15; break;
-            case '30d': days = 30; break;
-            case '60d': days = 60; break;
-            case '90d': days = 90; break;
-            default: days = 7;
-        }
-
         const endDate = new Date();
-        const startDate = new Date();
-        if (days === 1) {
-            startDate.setHours(0, 0, 0, 0); // Start of today
-        } else {
-            startDate.setDate(endDate.getDate() - days);
-        }
+        const startDate = new Date(REPORT_START_AT);
 
         const dateFilter = {
             gte: startDate,
@@ -46,9 +58,65 @@ router.get('/summary', async (req: Request, res: Response) => {
         };
 
         const companyId = getCompanyId(req);
-        const where = { createdAt: dateFilter, companyId };
+        const seesAll = canViewAll(req.user?.role);
+        const userId = req.user?.id;
+        const ticketOwnership = seesAll || !userId
+            ? {}
+            : {
+                OR: [
+                    { assignedUserId: userId },
+                    { fieldService: { is: { technicianId: userId } } },
+                    { conversation: { is: { assignedUserId: userId } } },
+                ],
+            };
+        const fieldServiceOwnership = seesAll || !userId
+            ? {}
+            : {
+                OR: [
+                    { technicianId: userId },
+                    { ticket: { is: { assignedUserId: userId } } },
+                    { ticket: { is: { conversation: { is: { assignedUserId: userId } } } } },
+                ],
+            };
+        const conversationOwnership = seesAll || !userId ? {} : { assignedUserId: userId };
+        const reportableContact = { includeInServiceReports: true };
+        const reportableConversation = { contact: { is: reportableContact }, ...conversationOwnership };
+        const reportableTicket = { contact: { is: reportableContact }, ...ticketOwnership };
+        const reportableFieldService = {
+            ticket: { is: { contact: { is: reportableContact } } },
+            ...fieldServiceOwnership,
+        };
+        const where = { createdAt: dateFilter, companyId, ...reportableConversation };
+        const messageWhere = seesAll || !userId
+            ? { createdAt: dateFilter, companyId, conversation: { is: { contact: { is: reportableContact } } } }
+            : { createdAt: dateFilter, companyId, conversation: { is: reportableConversation } };
+        const ticketWhere = { createdAt: dateFilter, companyId, ...reportableTicket };
+        const fieldServiceWhere = { createdAt: dateFilter, companyId, ...reportableFieldService };
+        const ratingWhere = {
+            companyId,
+            ratedAt: dateFilter,
+            rating: { not: null },
+            contact: { is: reportableContact },
+            ...conversationOwnership,
+        };
+        const fieldServiceTodayWhere = {
+            companyId,
+            AND: [
+                reportableFieldService,
+                {
+                    OR: [
+                        { scheduledAt: dateFilter },
+                        { visitWindowStart: dateFilter },
+                    ],
+                },
+            ],
+        };
 
         const [
+            queueCount,
+            activeConversations,
+            visitsToday,
+            pendingVisits,
             totalConversationsOpened,
             totalMessages,
             totalTicketsOpened,
@@ -56,11 +124,20 @@ router.get('/summary', async (req: Request, res: Response) => {
             conversationsWithDept,
             fieldServicesWithTech,
             csatAgg,
+            ratingsByAttendant,
+            recentConversations,
+            recentVisits,
         ] = await Promise.all([
+            prisma.conversation.count({ where: { ...where, status: 'OPEN' } }),
+            prisma.conversation.count({ where: { ...where, status: 'ASSIGNED' } }),
+            prisma.ticketFieldService.count({
+                where: fieldServiceTodayWhere,
+            }),
+            prisma.ticketFieldService.count({ where: { ...fieldServiceWhere, status: { in: ['PENDING', 'SCHEDULED', 'IN_PROGRESS'] } } }),
             prisma.conversation.count({ where }),
-            prisma.message.count({ where }),
-            prisma.ticket.count({ where }),
-            prisma.ticket.count({ where: { status: 'RESOLVED', closedAt: dateFilter, companyId } }),
+            prisma.message.count({ where: messageWhere }),
+            prisma.ticket.count({ where: ticketWhere }),
+            prisma.ticket.count({ where: { status: 'RESOLVED', closedAt: dateFilter, companyId, ...reportableTicket } }),
             prisma.conversation.groupBy({
                 by: ['departmentId'],
                 where: { ...where, departmentId: { not: null } },
@@ -68,13 +145,44 @@ router.get('/summary', async (req: Request, res: Response) => {
             }),
             prisma.ticketFieldService.groupBy({
                 by: ['technicianId'],
-                where: { createdAt: dateFilter, companyId, technicianId: { not: null } },
+                where: { ...fieldServiceWhere, technicianId: { not: null } },
                 _count: { _all: true }
             }),
-            prisma.ticketEvaluation.aggregate({
-                where: { createdAt: dateFilter, companyId },
+            prisma.conversation.aggregate({
+                where: ratingWhere,
                 _avg: { rating: true },
-                _count: { _all: true },
+                _count: { rating: true },
+            }),
+            prisma.conversation.groupBy({
+                by: ['assignedUserId'],
+                where: { ...ratingWhere, assignedUserId: { not: null } },
+                _avg: { rating: true },
+                _count: { rating: true },
+            }),
+            prisma.conversation.findMany({
+                where,
+                orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
+                take: 5,
+                include: {
+                    contact: { include: { customer: { select: { name: true } } } },
+                    assignedUser: { select: { id: true, name: true } },
+                    department: true,
+                    serviceTopic: true,
+                },
+            }),
+            prisma.ticketFieldService.findMany({
+                where: fieldServiceWhere,
+                orderBy: [{ scheduledAt: 'desc' }, { createdAt: 'desc' }],
+                take: 5,
+                include: {
+                    technician: { select: { id: true, name: true } },
+                    ticket: {
+                        include: {
+                            contact: true,
+                            customer: true,
+                        },
+                    },
+                },
             }),
         ]);
 
@@ -86,6 +194,12 @@ router.get('/summary', async (req: Request, res: Response) => {
         const techIds = fieldServicesWithTech.map(t => t.technicianId).filter(Boolean) as string[];
         const technicians = await prisma.user.findMany({
             where: { id: { in: techIds } }
+        });
+
+        const ratedAttendantIds = ratingsByAttendant.map(item => item.assignedUserId).filter(Boolean) as string[];
+        const ratedAttendants = await prisma.user.findMany({
+            where: { id: { in: ratedAttendantIds }, companyId },
+            select: { id: true, name: true },
         });
 
         const conversationsByDepartment = conversationsWithDept.map(c => {
@@ -104,18 +218,64 @@ router.get('/summary', async (req: Request, res: Response) => {
             };
         });
 
+        const attendantRatings = ratingsByAttendant
+            .map((item) => {
+                const attendant = ratedAttendants.find(user => user.id === item.assignedUserId);
+                return {
+                    userId: item.assignedUserId as string,
+                    userName: attendant?.name ?? 'Atendente não encontrado',
+                    average: item._avg.rating ?? 0,
+                    count: item._count.rating,
+                };
+            })
+            .sort((a, b) => b.average - a.average || b.count - a.count || a.userName.localeCompare(b.userName));
+
         res.json({
-            range,
+            range: 'from-2026-07-14T08:00:00-03:00',
             startDate,
             endDate,
             metrics: {
+                queueCount,
+                activeConversations,
+                visitsToday,
+                pendingVisits,
                 totalConversationsOpened,
                 totalMessages,
                 totalTicketsOpened,
                 totalTicketsResolved,
                 conversationsByDepartment,
                 ticketsByTechnician,
-                csat: { average: csatAgg._avg.rating, count: csatAgg._count._all }
+                csat: { average: csatAgg._avg.rating, count: csatAgg._count.rating },
+                attendantRatings,
+                recentConversations: recentConversations.map((conversation) => ({
+                    id: conversation.id,
+                    status: conversation.status,
+                    contactName: formatContactDisplayName({
+                        personName: conversation.contact.name,
+                        phone: conversation.contact.phone,
+                        companyName: conversation.contact.customer?.name,
+                    }),
+                    contactPhone: conversation.contact.phone,
+                    assignedUserName: conversation.assignedUser?.name ?? null,
+                    departmentName: conversation.department?.name ?? null,
+                    serviceTopicName: conversation.serviceTopic?.name ?? null,
+                    lastMessageAt: conversation.lastMessageAt,
+                    createdAt: conversation.createdAt,
+                })),
+                recentVisits: recentVisits.map((fieldService) => ({
+                    id: fieldService.id,
+                    ticketId: fieldService.ticketId,
+                    protocol: fieldService.ticket.protocol,
+                    title: fieldService.ticket.title,
+                    status: fieldService.status,
+                    ticketStatus: fieldService.ticket.status,
+                    priority: fieldService.ticket.priority,
+                    scheduledAt: fieldService.scheduledAt,
+                    visitWindowStart: fieldService.visitWindowStart,
+                    technicianName: fieldService.technician?.name ?? null,
+                    customerName: fieldService.ticket.customer?.name ?? fieldService.ticket.contact.name ?? null,
+                    contactPhone: fieldService.ticket.contact.phone,
+                }))
             }
         });
 

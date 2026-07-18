@@ -1,94 +1,146 @@
-import { Routes, Route, useNavigate } from 'react-router-dom';
-import Login from './pages/Login';
-import Users from './pages/Users';
-import Departments from './pages/Departments';
-import Customers from './pages/Customers';
-import Dashboard from './pages/Dashboard';
-import Inbox from './pages/Inbox';
-import Settings from './pages/Settings';
-import Tickets from './pages/Tickets';
-import TicketDetail from './pages/TicketDetail';
-import Reports from './pages/Reports';
-import PrivacyPolicy from './pages/PrivacyPolicy';
-import TermsOfService from './pages/TermsOfService';
-import NotFound from './pages/NotFound';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Route, Routes, useNavigate } from 'react-router-dom';
 import { clearAuthToken, getAuthToken } from './lib/authToken';
-import { AuthProvider } from './lib/auth';
+import { AuthProvider, useAuth } from './lib/auth';
 
-/** Valida se string é um JWT bem formado (3 partes base64 separadas por ponto) */
+const Login = lazy(() => import('./pages/Login'));
+const Users = lazy(() => import('./pages/Users'));
+const Departments = lazy(() => import('./pages/Departments'));
+const ServiceTopics = lazy(() => import('./pages/ServiceTopics'));
+const Customers = lazy(() => import('./pages/Customers'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Inbox = lazy(() => import('./pages/Inbox'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Tickets = lazy(() => import('./pages/Tickets'));
+const TicketDetail = lazy(() => import('./pages/TicketDetail'));
+const Visits = lazy(() => import('./pages/Visits'));
+const Reports = lazy(() => import('./pages/Reports'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const NotFound = lazy(() => import('./pages/NotFound'));
+
 function isValidJwtFormat(token: string): boolean {
     const parts = token.split('.');
-    return parts.length === 3 && parts.every(p => p.length > 0);
+    return parts.length === 3 && parts.every((part) => part.length > 0);
 }
 
-/** Tela de loading — usa CSS vars para funcionar em light e dark */
 function LoadingScreen() {
     return (
-        <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '100vw',
-            height: '100vh',
-            background: 'var(--c-background)',
-        }}>
-            <div style={{
-                width: 40,
-                height: 40,
-                border: '3px solid rgb(var(--c-primary) / 0.2)',
-                borderTop: '3px solid rgb(var(--c-primary))',
-                borderRadius: '50%',
-                animation: 'sigma-spin 0.8s linear infinite',
-            }} />
+        <div
+            role="status"
+            aria-label="Carregando aplicação"
+            style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '100vw',
+                height: '100vh',
+                background: 'var(--c-background)',
+            }}
+        >
+            <div
+                aria-hidden="true"
+                style={{
+                    width: 40,
+                    height: 40,
+                    border: '3px solid rgb(var(--c-primary) / 0.2)',
+                    borderTop: '3px solid rgb(var(--c-primary))',
+                    borderRadius: '50%',
+                    animation: 'sigma-spin 0.8s linear infinite',
+                }}
+            />
+            <span className="sr-only">Carregando aplicação</span>
             <style>{`@keyframes sigma-spin { to { transform: rotate(360deg); } }`}</style>
         </div>
     );
 }
 
+function AppSuspense({ children }: { children: React.ReactNode }) {
+    return <Suspense fallback={<LoadingScreen />}>{children}</Suspense>;
+}
+
 function ProtectedLayout({ children }: { children: React.ReactNode }) {
     const navigate = useNavigate();
-    // null = ainda verificando, false = não autenticado, true = autenticado
     const [authState, setAuthState] = useState<null | boolean>(null);
 
     useEffect(() => {
         const token = getAuthToken();
 
         if (!token || !isValidJwtFormat(token)) {
-            // Token ausente ou malformado — limpa e redireciona
             clearAuthToken();
             setAuthState(false);
             navigate('/login');
             return;
         }
 
-        // Token parece válido — deixa a API rejeitar se necessário
         setAuthState(true);
     }, [navigate]);
 
     if (authState === null) return <LoadingScreen />;
     if (authState === false) return null;
 
-    return <AuthProvider>{children}</AuthProvider>;
+    return (
+        <AuthProvider>
+            <AppSuspense>{children}</AppSuspense>
+        </AuthProvider>
+    );
+}
+
+function RoleGuard({ allowedRoles, children }: { allowedRoles: string[]; children: React.ReactNode }) {
+    const { user, loading } = useAuth();
+    if (loading) return <LoadingScreen />;
+
+    if (!user || !allowedRoles.includes(user.role)) {
+        return (
+            <div className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+                <div className="max-w-md rounded-2xl border border-border bg-surface p-6 text-center shadow-card">
+                    <h1 className="text-2xl font-bold text-foreground">Acesso restrito</h1>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                        Você não tem permissão para acessar esta área.
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    return <>{children}</>;
 }
 
 function App() {
     return (
-        <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
-            <Route path="/inbox" element={<ProtectedLayout><Inbox /></ProtectedLayout>} />
-            <Route path="/tickets" element={<ProtectedLayout><Tickets /></ProtectedLayout>} />
-            <Route path="/tickets/:id" element={<ProtectedLayout><TicketDetail /></ProtectedLayout>} />
-            <Route path="/customers" element={<ProtectedLayout><Customers /></ProtectedLayout>} />
-            <Route path="/users" element={<ProtectedLayout><Users /></ProtectedLayout>} />
-            <Route path="/departments" element={<ProtectedLayout><Departments /></ProtectedLayout>} />
-            <Route path="/reports" element={<ProtectedLayout><Reports /></ProtectedLayout>} />
-            <Route path="/settings" element={<ProtectedLayout><Settings /></ProtectedLayout>} />
-            <Route path="/politica-de-privacidade" element={<PrivacyPolicy />} />
-            <Route path="/termos-de-servico" element={<TermsOfService />} />
-            <Route path="*" element={<ProtectedLayout><NotFound /></ProtectedLayout>} />
-        </Routes>
+        <AppSuspense>
+            <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route path="/" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
+                <Route path="/inbox" element={<ProtectedLayout><Inbox /></ProtectedLayout>} />
+                <Route path="/notifications" element={<ProtectedLayout><Notifications /></ProtectedLayout>} />
+                <Route path="/tickets" element={<ProtectedLayout><Tickets /></ProtectedLayout>} />
+                <Route path="/tickets/:id" element={<ProtectedLayout><TicketDetail /></ProtectedLayout>} />
+                <Route path="/visits" element={<ProtectedLayout><Visits /></ProtectedLayout>} />
+                <Route path="/customers" element={<ProtectedLayout><Customers /></ProtectedLayout>} />
+                <Route
+                    path="/users"
+                    element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><Users /></RoleGuard></ProtectedLayout>}
+                />
+                <Route
+                    path="/departments"
+                    element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><Departments /></RoleGuard></ProtectedLayout>}
+                />
+                <Route
+                    path="/service-topics"
+                    element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><ServiceTopics /></RoleGuard></ProtectedLayout>}
+                />
+                <Route path="/reports" element={<ProtectedLayout><Reports /></ProtectedLayout>} />
+                <Route
+                    path="/settings"
+                    element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><Settings /></RoleGuard></ProtectedLayout>}
+                />
+                <Route path="/politica-de-privacidade" element={<PrivacyPolicy />} />
+                <Route path="/termos-de-servico" element={<TermsOfService />} />
+                <Route path="*" element={<ProtectedLayout><NotFound /></ProtectedLayout>} />
+            </Routes>
+        </AppSuspense>
     );
 }
 

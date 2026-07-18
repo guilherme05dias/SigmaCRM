@@ -30,6 +30,15 @@ export default {
                     800: 'rgb(var(--c-primary-800) / <alpha-value>)',
                     900: 'rgb(var(--c-primary-900) / <alpha-value>)',
                 },
+                'primary-solid': {
+                    DEFAULT: 'rgb(var(--c-primary-solid) / <alpha-value>)',
+                    hover: 'rgb(var(--c-primary-solid-hover) / <alpha-value>)',
+                    fg: 'rgb(var(--c-primary-solid-fg) / <alpha-value>)',
+                },
+                accent: {
+                    DEFAULT: 'rgb(var(--c-accent) / <alpha-value>)',
+                    soft: 'var(--c-accent-soft)',
+                },
 
                 // ── Superfícies (sem opacidade — hex direto via var) ─────────
                 background:   'var(--c-background)',
@@ -58,6 +67,11 @@ export default {
                     DEFAULT: 'rgb(var(--c-danger) / <alpha-value>)',
                     soft:    'var(--c-danger-soft)',
                     fg:      'var(--c-danger-fg)',
+                },
+                'danger-solid': {
+                    DEFAULT: 'rgb(var(--c-danger-solid) / <alpha-value>)',
+                    hover: 'rgb(var(--c-danger-solid-hover) / <alpha-value>)',
+                    fg: 'rgb(var(--c-danger-solid-fg) / <alpha-value>)',
                 },
                 info: {
                     DEFAULT: 'rgb(var(--c-info) / <alpha-value>)',
@@ -113,13 +127,13 @@ export default {
             },
 
             boxShadow: {
-                sm:             "rgba(45,127,249,0.12) 0px 1px 2px",
-                card:           "rgba(45,127,249,0.18) 0px 1px 3px, rgba(45,127,249,0.08) 0px 1px 2px",
-                premium:        "rgba(45,127,249,0.20) 0px 4px 12px, rgba(45,127,249,0.10) 0px 1px 4px",
-                lifted:         "rgba(45,127,249,0.24) 0px 8px 24px, rgba(45,127,249,0.10) 0px 2px 6px",
-                "primary-glow": "rgba(27,97,201,0.32) 0px 4px 14px",
-                "cyan-glow":    "rgba(37,79,173,0.20) 0px 4px 14px",
-                "focus-ring":   "0 0 0 3px rgba(27,97,201,0.28)",
+                sm:             "none",
+                card:           "none",
+                premium:        "none",
+                lifted:         "0 24px 64px rgba(0,0,0,0.48)",
+                "primary-glow": "none",
+                "cyan-glow":    "none",
+                "focus-ring":   "0 0 0 3px rgba(124,58,237,0.30)",
             },
 
             keyframes: {

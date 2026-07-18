@@ -14,36 +14,46 @@
   color-scheme: light;
 
   /* Superfícies — hex direto (sem opacidade) */
-  --c-background:    #ffffff;
+  --c-background:    #f7f7fa;
   --c-surface:       #ffffff;
-  --c-surface-alt:   #f8fafc;
+  --c-surface-alt:   #f4f2f8;
   --c-elevated:      #ffffff;
-  --c-border:        #e0e2e6;
+  --c-border:        #ddd9e6;
 
   /* Chat — tokens semânticos para o ChatWindow */
-  --c-chat-bg:          #f0f4f8;  /* fundo da área de mensagens — slate muito claro */
-  --c-chat-input-bg:    #f8fafc;  /* barra de input */
+  --c-chat-bg:          #f0eef3;  /* fundo familiar ao WhatsApp na paleta Sigma */
+  --c-chat-input-bg:    #f4f2f7;  /* barra de input */
   --c-chat-bubble-in:   #ffffff;  /* bolha recebida (INBOUND) */
-  --c-chat-bubble-out:  #dbeafe;  /* bolha enviada (OUTBOUND) — primary-100 equivalente */
-  --c-chat-sig:         #1b61c9;  /* cor da assinatura do técnico — primary-600 */
+  --c-chat-bubble-out:  #ede9fe;  /* bolha enviada (OUTBOUND) */
+  --c-chat-sig:         #5b21b6;  /* assinatura e leitura */
+  --c-chat-action:      #6d28d9;
+  --c-unread-bg:        oklch(58.5% 0.233 293.6);
+  --c-unread-fg:        oklch(100% 0 0);
+  --c-unread-surface:   oklch(96.9% 0.016 293.8);
+  --c-unread-accent:    oklch(49.1% 0.234 292.6);
 
   /* Primária — canais RGB (suporta /N opacity) */
-  --c-primary:     27 97 201;    /* #1b61c9 — Airtable Blue */
+  --c-primary:     91 33 182;    /* #5b21b6 — roxo de alto contraste */
   --c-primary-fg:  255 255 255;
-  --c-primary-50:  239 245 253;
-  --c-primary-100: 219 233 250;
-  --c-primary-200: 184 211 245;
-  --c-primary-300: 133 178 238;
-  --c-primary-400:  77 135 226;
-  --c-primary-500:  44 109 213;
-  --c-primary-600:  27  97 201;
-  --c-primary-700:  37  79 173;  /* #254fad — Mid Blue hover */
-  --c-primary-800:  30  61 135;
-  --c-primary-900:  26  47 107;
+  --c-primary-solid: 109 40 217;
+  --c-primary-solid-hover: 91 33 182;
+  --c-primary-solid-fg: 255 255 255;
+  --c-accent:      124 58 237;
+  --c-accent-soft: #f5f3ff;
+  --c-primary-50:  245 243 255;
+  --c-primary-100: 237 233 254;
+  --c-primary-200: 221 214 254;
+  --c-primary-300: 196 181 253;
+  --c-primary-400: 167 139 250;
+  --c-primary-500: 139  92 246;
+  --c-primary-600: 124  58 237;
+  --c-primary-700: 109  40 217;
+  --c-primary-800:  91  33 182;
+  --c-primary-900:  76  29 149;
 
   /* Conteúdo — canais RGB */
-  --c-foreground: 24 29 38;      /* #181d26 — Deep Navy */
-  --c-muted-fg:   82 89 101;     /* #525965 — rgba(4,14,32,0.69) em branco */
+  --c-foreground: 11 11 15;      /* #0b0b0f — preto de leitura */
+  --c-muted-fg:   95 91 102;     /* #5f5b66 — 6.61:1 sobre branco */
 
   /* Status — canais RGB para DEFAULT + hex para soft/fg */
   --c-success:      0 100   0;
@@ -55,46 +65,59 @@
   --c-warning-fg:   #92400e;
 
   --c-danger:     220  38  38;
+  --c-danger-solid: 185 28 28;
+  --c-danger-solid-hover: 153 27 27;
+  --c-danger-solid-fg: 255 255 255;
   --c-danger-soft: #fee2e2;
   --c-danger-fg:   #991b1b;
 
-  --c-info:        27  97 201;
-  --c-info-soft:  #dbe9fa;
-  --c-info-fg:    #254fad;
+  --c-info:        109 40 217;
+  --c-info-soft:  #ede9fe;
+  --c-info-fg:    #5b21b6;
 }
 
 /* ── DARK ─────────────────────────────────────────────────────────────────── */
 .dark {
   color-scheme: dark;
 
-  --c-background:   #111318;
-  --c-surface:      #1a1d25;
-  --c-surface-alt:  #222630;
-  --c-elevated:     #222630;
-  --c-border:       #2d3748;
+  --c-background:   #000000;
+  --c-surface:      #0a0a0a;
+  --c-surface-alt:  #121212;
+  --c-elevated:     #1a1a1a;
+  --c-border:       #2a2a2a;
 
   /* Chat — dark mode */
-  --c-chat-bg:          #161920;  /* fundo do chat escuro */
-  --c-chat-input-bg:    #1a1d25;  /* barra de input escura */
-  --c-chat-bubble-in:   #1e2230;  /* bolha recebida */
-  --c-chat-bubble-out:  #1a2d52;  /* bolha enviada — primary-50 dark */
-  --c-chat-sig:         #4f94f6;  /* assinatura — primary-400 dark */
+  --c-chat-bg:          #000000;  /* preto puro no fundo do chat */
+  --c-chat-input-bg:    #121212;  /* barra de input escura */
+  --c-chat-bubble-in:   #121212;  /* bolha recebida */
+  --c-chat-bubble-out:  #2a193e;  /* bolha enviada */
+  --c-chat-sig:         #c4b5fd;  /* assinatura */
+  --c-chat-action:      #6d28d9;
+  --c-unread-bg:        oklch(58.5% 0.233 293.6);
+  --c-unread-fg:        oklch(100% 0 0);
+  --c-unread-surface:   oklch(20.5% 0.052 300);
+  --c-unread-accent:    oklch(82.7% 0.119 306.4);
 
-  --c-primary:     79 148 246;   /* #4f94f6 — Airtable Blue mais vivo no dark */
+  --c-primary:     196 181 253;  /* roxo claro para links e foco */
   --c-primary-fg:  255 255 255;
-  --c-primary-50:   19  38  70;
-  --c-primary-100:  27  53  99;
-  --c-primary-200:  35  75 143;
-  --c-primary-300:  58 105 190;
-  --c-primary-400:  79 148 246;
-  --c-primary-500: 110 170 255;
-  --c-primary-600: 139 190 255;
-  --c-primary-700: 163 205 255;
-  --c-primary-800: 199 225 255;
-  --c-primary-900: 224 240 255;
+  --c-primary-solid: 109 40 217;
+  --c-primary-solid-hover: 124 58 237;
+  --c-primary-solid-fg: 255 255 255;
+  --c-accent:      167 139 250;
+  --c-accent-soft: #2a193e;
+  --c-primary-50:   33  18  53;
+  --c-primary-100:  46  25  72;
+  --c-primary-200:  67  34 100;
+  --c-primary-300:  91  42 131;
+  --c-primary-400: 124  58 237;
+  --c-primary-500: 139  92 246;
+  --c-primary-600: 167 139 250;
+  --c-primary-700: 196 181 253;
+  --c-primary-800: 221 214 254;
+  --c-primary-900: 245 243 255;
 
-  --c-foreground: 226 232 240;   /* #e2e8f0 */
-  --c-muted-fg:   148 163 184;   /* #94a3b8 */
+  --c-foreground: 250 250 250;   /* #fafafa */
+  --c-muted-fg:   176 171 184;   /* #b0abb8 — 8.39:1 sobre surface */
 
   --c-success:     74 222 128;
   --c-success-soft: #0d2b12;
@@ -105,12 +128,15 @@
   --c-warning-fg:   #fcd34d;
 
   --c-danger:     248  81  73;
+  --c-danger-solid: 185 28 28;
+  --c-danger-solid-hover: 220 38 38;
+  --c-danger-solid-fg: 255 255 255;
   --c-danger-soft: #2d1214;
   --c-danger-fg:   #fca5a5;
 
-  --c-info:        79 148 246;
-  --c-info-soft:  #1a2a4a;
-  --c-info-fg:    #93c5fd;
+  --c-info:        167 139 250;
+  --c-info-soft:  #2a193e;
+  --c-info-fg:    #c4b5fd;
 }
 
 /* ── BASE LAYER ───────────────────────────────────────────────────────────── */
@@ -129,11 +155,12 @@
     @apply font-display tracking-wide;
     font-weight: 400;
     color: rgb(var(--c-foreground));
+    text-wrap: balance;
   }
 
   :where(a, button, input, select, textarea, [tabindex]):focus-visible {
     outline: none;
-    box-shadow: 0 0 0 2px var(--c-background), 0 0 0 4px rgba(79,148,246,0.40);
+    box-shadow: 0 0 0 2px var(--c-background), 0 0 0 4px rgba(124,58,237,0.45);
     border-radius: theme('borderRadius.xl');
   }
 }
@@ -150,6 +177,112 @@
     border-radius: 9999px;
   }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  .sigma-inbox-shell {
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+
+  .sigma-wa-conversation-list {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
+  @media (min-width: 768px) {
+    .sigma-wa-conversation-list {
+      width: clamp(320px, 25vw, 400px);
+      min-width: 320px;
+      max-width: 400px;
+      flex: 0 0 clamp(320px, 25vw, 400px);
+    }
+  }
+
+  .sigma-chat-surface {
+    background-color: var(--c-chat-bg);
+  }
+
+  .sigma-chat-header {
+    container-name: chat-header;
+    container-type: inline-size;
+  }
+
+  .sigma-chat-action-button {
+    width: 2.75rem;
+    padding-inline: 0;
+  }
+
+  .sigma-chat-action-label,
+  .sigma-chat-transfer-wide {
+    display: none;
+  }
+
+  .sigma-chat-transfer-compact {
+    display: inline-flex;
+  }
+
+  @container chat-header (min-width: 980px) {
+    .sigma-chat-action-button {
+      width: auto !important;
+      padding-inline: 1rem !important;
+    }
+
+    .sigma-chat-action-label {
+      display: inline;
+    }
+
+    .sigma-chat-transfer-wide {
+      display: flex;
+    }
+
+    .sigma-chat-transfer-compact {
+      display: none;
+    }
+  }
+
+  @container chat-header (max-width: 520px) {
+    .sigma-chat-contact,
+    .sigma-chat-actions {
+      width: 100%;
+    }
+
+    .sigma-chat-actions {
+      justify-content: flex-end;
+    }
+  }
+
+  @container chat-header (max-width: 390px) {
+    .sigma-chat-contact-avatar,
+    .sigma-chat-contact-meta {
+      display: none;
+    }
+  }
+
+  .sigma-chat-bubble {
+    position: relative;
+  }
+
+  .sigma-chat-bubble-in::before,
+  .sigma-chat-bubble-out::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: 10px;
+    height: 13px;
+    background: inherit;
+  }
+
+  .sigma-chat-bubble-in::before {
+    left: -7px;
+    clip-path: polygon(100% 0, 0 0, 100% 100%);
+  }
+
+  .sigma-chat-bubble-out::before {
+    right: -7px;
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

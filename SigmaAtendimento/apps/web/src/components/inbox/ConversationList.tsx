@@ -2,6 +2,9 @@ import { FormEvent, useState } from 'react';
 import type { Conversation } from './types';
 import { EmptyState } from '../ui/EmptyState';
 import { Skeleton } from '../ui/Skeleton';
+import { ContactAvatar } from './ContactAvatar';
+import { displayMessageBody } from './messagePresentation';
+import { contactDisplayName } from './contactDisplayName';
 
 interface ConversationListProps {
     conversations: Conversation[];
@@ -12,16 +15,20 @@ interface ConversationListProps {
     isLoading: boolean;
     activeTab: 'chats' | 'fila' | 'historico' | 'contatos';
     setActiveTab: (tab: 'chats' | 'fila' | 'historico' | 'contatos') => void;
+    queueCount: number;
+    showManagementScope?: boolean;
+    managementScope?: 'mine' | 'all';
+    onManagementScopeChange?: (scope: 'mine' | 'all') => void;
 }
 
 function formatTime(value?: string | Date | null) {
     if (!value) return '';
-    return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return new Date(value).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatDateTime(value?: string | Date | null) {
     if (!value) return '';
-    return new Date(value).toLocaleString([], {
+    return new Date(value).toLocaleString('pt-BR', {
         day: '2-digit',
         month: '2-digit',
         hour: '2-digit',
@@ -29,16 +36,8 @@ function formatDateTime(value?: string | Date | null) {
     });
 }
 
-function statusLabel(status: Conversation['status']) {
-    if (status === 'OPEN') return 'Fila';
-    if (status === 'ASSIGNED') return 'Em atendimento';
-    return 'Fechada';
-}
-
-function statusClass(status: Conversation['status']) {
-    if (status === 'OPEN') return 'bg-warning-soft text-warning-fg';
-    if (status === 'ASSIGNED') return 'bg-primary-50 text-primary-700';
-    return 'bg-surface-alt text-muted-foreground';
+function conversationName(conversation: Conversation) {
+    return contactDisplayName(conversation.contact);
 }
 
 export function ConversationList({
@@ -50,9 +49,14 @@ export function ConversationList({
     isLoading,
     activeTab,
     setActiveTab,
+    queueCount,
+    showManagementScope = false,
+    managementScope = 'mine',
+    onManagementScopeChange,
 }: ConversationListProps) {
-    const [phone, setPhone] = useState('');
+    const [query, setQuery] = useState('');
     const isHistoryTab = activeTab === 'historico';
+
     const emptyCopy = activeTab === 'historico'
         ? {
             title: 'Nenhum historico encontrado',
@@ -79,62 +83,131 @@ export function ConversationList({
 
     const submit = async (event: FormEvent) => {
         event.preventDefault();
-        const value = phone.trim();
+        const value = query.trim();
         if (!value) return;
         await onStartConversation(value);
+        setQuery('');
     };
 
-    return (
-        <aside className={`${selectedId ? 'hidden md:flex' : 'flex'} min-h-0 w-full shrink-0 flex-col border-b border-border bg-surface md:w-[360px] md:border-b-0 md:border-r`}>
-            <div className="p-5 border-b border-border">
-                <h1 className="text-xl font-bold text-foreground">Conversas</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                    {isHistoryTab ? 'Histórico completo do WhatsApp e atendimentos' : 'Atendimento em tempo real'}
-                </p>
+    const filteredConversations = conversations.filter((conversation) => {
+        const value = query.trim().toLowerCase();
+        if (!value) return true;
 
-                <form onSubmit={submit} className="mt-4 rounded-xl border border-border bg-surface-alt p-3" aria-label="Iniciar nova conversa">
-                    <label htmlFor="new-conversation-phone" className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Nova conversa
-                    </label>
-                    <div className="mt-2 flex gap-2">
+        const lastMessage = conversation.messages?.[0]?.body || '';
+        const name = conversationName(conversation);
+        const phone = conversation.contact?.phone || '';
+        return `${name} ${phone} ${lastMessage}`.toLowerCase().includes(value);
+    });
+
+    const tabItems: Array<[ConversationListProps['activeTab'], string]> = [
+        ['chats', 'Conversas'],
+        ['fila', 'Fila'],
+        ['historico', 'Historico'],
+        ['contatos', 'Contatos'],
+    ];
+
+    return (
+        <aside
+            className={`${selectedId ? 'hidden md:flex' : 'flex'} sigma-wa-conversation-list min-h-0 flex-col border-b border-border bg-surface md:border-b-0 md:border-r`}
+        >
+            <div className="border-b border-border bg-surface">
+                <div className="flex h-16 items-center justify-between gap-3 pl-[68px] pr-4">
+                    <div className="min-w-0">
+                        <h1 className="text-[22px] font-bold leading-7 text-foreground">Conversas</h1>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const value = query.trim();
+                            if (value) void onStartConversation(value).then(() => setQuery(''));
+                        }}
+                        disabled={isStartingConversation || !query.trim()}
+                        aria-label="Iniciar conversa"
+                        className="flex size-11 shrink-0 items-center justify-center rounded-full text-white transition-colors hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+                        style={{ background: 'var(--c-chat-action)' }}
+                    >
+                        {isStartingConversation ? (
+                            <span className="h-3 w-3 rounded-full border-2 border-white/50 border-t-white animate-spin" />
+                        ) : (
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M12 5v14" />
+                                <path d="M5 12h14" />
+                            </svg>
+                        )}
+                    </button>
+                </div>
+
+                <div className="px-3 pb-3">
+                    <form onSubmit={submit} className="flex items-center gap-2 rounded-full bg-surface-alt px-3 py-2" aria-label="Buscar ou iniciar conversa">
+                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground" aria-hidden="true">
+                            <circle cx="11" cy="11" r="7" />
+                            <path d="m20 20-3.5-3.5" />
+                        </svg>
                         <input
                             id="new-conversation-phone"
-                            value={phone}
-                            onChange={(event) => setPhone(event.target.value)}
-                            placeholder="5511999999999"
-                            aria-describedby="new-conversation-help"
-                            className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
+                            value={query}
+                            onChange={(event) => setQuery(event.target.value)}
+                            placeholder="Pesquisar ou iniciar nova conversa"
+                            className="min-w-0 flex-1 border-0 bg-transparent px-1 py-0.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
                         />
-                        <button
-                            type="submit"
-                            disabled={isStartingConversation || !phone.trim()}
-                            aria-label="Iniciar conversa pelo numero informado"
-                            className="rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                            {isStartingConversation ? 'Validando...' : 'Iniciar'}
-                        </button>
-                    </div>
-                    <p id="new-conversation-help" className="mt-2 text-[11px] text-muted-foreground">
-                        O sistema valida se o número tem WhatsApp antes de abrir o atendimento.
-                    </p>
-                </form>
+                        {query.trim() && (
+                            <button
+                                type="button"
+                                onClick={() => setQuery('')}
+                                className="flex size-11 items-center justify-center rounded-full text-muted-foreground hover:bg-surface hover:text-foreground"
+                                aria-label="Limpar busca"
+                            >
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                                    <path d="M18 6 6 18" />
+                                    <path d="m6 6 12 12" />
+                                </svg>
+                            </button>
+                        )}
+                    </form>
+                </div>
 
-                <div className="mt-4 grid grid-cols-4 gap-2 rounded-lg bg-surface-alt p-1" role="tablist" aria-label="Filtros de conversa">
-                    {[
-                        ['chats', 'Chats'],
-                        ['fila', 'Fila'],
-                        ['historico', 'Histórico'],
-                        ['contatos', 'Contatos'],
-                    ].map(([value, label]) => (
+                {showManagementScope && (
+                    <div className="px-3 pb-3">
+                        <div className="grid grid-cols-2 rounded-lg bg-surface-alt p-1" role="group" aria-label="Escopo dos atendimentos">
+                            {([
+                                ['mine', 'Meus atendimentos'],
+                                ['all', 'Todos'],
+                            ] as const).map(([scope, label]) => {
+                                const selected = managementScope === scope;
+                                return (
+                                    <button
+                                        key={scope}
+                                        type="button"
+                                        onClick={() => onManagementScopeChange?.(scope)}
+                                        aria-pressed={selected}
+                                        className={`min-h-9 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${selected ? 'bg-surface text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                    >
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex gap-2 overflow-x-auto px-3 pb-3 scrollbar-thin" role="tablist" aria-label="Filtros de conversa">
+                    {tabItems.map(([value, label]) => (
                         <button
                             key={value}
                             type="button"
                             role="tab"
                             aria-selected={activeTab === value}
-                            onClick={() => setActiveTab(value as ConversationListProps['activeTab'])}
-                            className={`rounded-md px-3 py-2 text-xs font-semibold transition-colors cursor-pointer ${activeTab === value ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-surface hover:text-foreground'}`}
+                            onClick={() => setActiveTab(value)}
+                            className={`min-h-11 whitespace-nowrap rounded-full px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${activeTab === value ? 'text-white' : 'bg-surface-alt text-muted-foreground hover:bg-elevated hover:text-foreground'}`}
+                            style={activeTab === value ? { background: 'var(--c-chat-action)' } : undefined}
                         >
-                            {label}
+                            <span>{label}</span>
+                            {value === 'fila' && queueCount > 0 && (
+                                <span className={`ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none ${activeTab === value ? 'bg-white/20 text-white' : 'bg-warning-soft text-warning-fg'}`} aria-label={`${queueCount} conversas aguardando`}>
+                                    {queueCount > 99 ? '99+' : queueCount}
+                                </span>
+                            )}
                         </button>
                     ))}
                 </div>
@@ -142,36 +215,38 @@ export function ConversationList({
 
             <div className="min-h-0 flex-1 overflow-y-auto">
                 {isLoading ? (
-                    <div className="space-y-4 p-4" aria-label="Carregando conversas">
-                        {Array.from({ length: 6 }).map((_, index) => (
-                            <div key={index} className="rounded-xl border border-border bg-surface p-4">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0 flex-1 space-y-2">
+                    <div className="divide-y divide-border" aria-label="Carregando conversas">
+                        {Array.from({ length: 7 }).map((_, index) => (
+                            <div key={index} className="grid min-h-[72px] items-center gap-3 px-3 py-2 sm:px-4" style={{ gridTemplateColumns: '49px minmax(0, 1fr)' }}>
+                                <Skeleton className="h-[49px] w-[49px] shrink-0 rounded-full" />
+                                <div className="min-w-0 flex-1 space-y-2">
+                                    <div className="flex items-start justify-between gap-3">
                                         <Skeleton className="h-4 w-36" />
-                                        <Skeleton className="h-3 w-full" />
+                                        <Skeleton className="h-3 w-10" />
                                     </div>
-                                    <Skeleton className="h-3 w-10" />
-                                </div>
-                                <div className="mt-4 flex items-center justify-between gap-2">
-                                    <Skeleton className="h-6 w-20 rounded-full" />
-                                    <Skeleton className="h-3 w-24" />
+                                    <Skeleton className="h-3 w-full" />
                                 </div>
                             </div>
                         ))}
                     </div>
-                ) : conversations.length === 0 ? (
+                ) : filteredConversations.length === 0 ? (
                     <div className="p-4">
                         <EmptyState
                             icon={emptyCopy.icon}
                             title={emptyCopy.title}
-                            description={emptyCopy.description}
+                            description={query.trim() ? 'Nenhuma conversa encontrada para essa busca.' : emptyCopy.description}
                         />
                     </div>
                 ) : (
-                    conversations.map((conversation) => {
+                    filteredConversations.map((conversation) => {
                         const lastMessage = conversation.messages?.[0];
-                        const name = conversation.contact?.name || (conversation.contact as any)?.nome || conversation.contact?.phone || 'Contato';
+                        const name = conversationName(conversation);
                         const selected = selectedId === conversation.id;
+                        const unreadCount = Math.max(0, Number(conversation.unreadCount) || 0);
+                        const unreadLabel = `${unreadCount} ${unreadCount === 1 ? 'mensagem não lida' : 'mensagens não lidas'}`;
+                        const previewPrefix = lastMessage?.direction === 'OUTBOUND' ? 'Voce: ' : '';
+                        const previewBody = lastMessage ? displayMessageBody(lastMessage) : '';
+                        const preview = previewBody ? `${previewPrefix}${previewBody}` : 'Sem mensagens recentes';
 
                         return (
                             <button
@@ -179,23 +254,50 @@ export function ConversationList({
                                 type="button"
                                 onClick={() => onSelect(conversation.id)}
                                 aria-pressed={selected}
-                                aria-label={`Abrir conversa com ${name}`}
-                                className={`w-full border-b border-border p-4 text-left transition-colors cursor-pointer ${selected ? 'bg-primary/10' : 'hover:bg-surface-alt'}`}
+                                aria-label={`Abrir conversa com ${name}${unreadCount > 0 ? `, ${unreadLabel}` : ''}`}
+                                className={`group min-h-[72px] w-full border-b border-border px-3 py-2 text-left transition-colors cursor-pointer sm:px-4 ${selected ? 'bg-surface-alt' : 'hover:bg-surface-alt'}`}
+                                style={unreadCount > 0 ? { background: 'var(--c-unread-surface)' } : undefined}
                             >
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                        <p className="truncate font-semibold text-foreground">{name}</p>
-                                        <p className="mt-1 truncate text-sm text-muted-foreground">{lastMessage?.body || 'Sem mensagens recentes'}</p>
+                                <div className="grid items-center gap-3" style={{ gridTemplateColumns: '49px minmax(0, 1fr)' }}>
+                                    <ContactAvatar
+                                        contactId={conversation.contactId}
+                                        avatarUrl={conversation.contact?.avatarUrl}
+                                        name={name}
+                                        className="h-[49px] w-[49px] shrink-0 rounded-full text-base"
+                                        fetchOnMount
+                                    />
+
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <p className={`truncate text-[15px] leading-5 text-foreground ${unreadCount > 0 ? 'font-bold' : 'font-semibold'}`}>{name}</p>
+                                            <span className={`shrink-0 text-[11px] leading-5 ${unreadCount > 0 ? 'font-semibold' : selected ? 'text-[color:var(--c-chat-sig)]' : 'text-muted-foreground'}`} style={unreadCount > 0 ? { color: 'var(--c-unread-accent)' } : undefined}>
+                                                {isHistoryTab ? formatDateTime(conversation.lastMessageAt as any) : formatTime(conversation.lastMessageAt as any)}
+                                            </span>
+                                        </div>
+
+                                        <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+                                            <p className={`min-w-0 flex-1 truncate text-sm leading-5 ${unreadCount > 0 ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{preview}</p>
+                                            {unreadCount > 0 && (
+                                                <span
+                                                    className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none"
+                                                    style={{ background: 'var(--c-unread-bg)', color: 'var(--c-unread-fg)' }}
+                                                    title={unreadLabel}
+                                                    aria-label={unreadLabel}
+                                                >
+                                                    {unreadCount > 99 ? '99+' : unreadCount}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {(conversation.department?.name || (showManagementScope && conversation.assignedUser)) && (
+                                            <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                                                {conversation.department?.name || 'Sem setor'}
+                                                {showManagementScope && conversation.assignedUser
+                                                    ? ` · Responsável: ${conversation.assignedUser.name || conversation.assignedUser.nome || 'Usuário'}`
+                                                    : ''}
+                                            </p>
+                                        )}
                                     </div>
-                                    <span className="shrink-0 text-xs text-muted-foreground">
-                                        {isHistoryTab ? formatDateTime(conversation.lastMessageAt as any) : formatTime(conversation.lastMessageAt as any)}
-                                    </span>
-                                </div>
-                                <div className="mt-3 flex items-center justify-between gap-2">
-                                    <span className={`rounded-full px-2 py-1 text-[11px] font-bold ${statusClass(conversation.status)}`}>
-                                        {statusLabel(conversation.status)}
-                                    </span>
-                                    {conversation.department?.name && <span className="truncate text-xs text-muted-foreground">{conversation.department.name}</span>}
                                 </div>
                             </button>
                         );

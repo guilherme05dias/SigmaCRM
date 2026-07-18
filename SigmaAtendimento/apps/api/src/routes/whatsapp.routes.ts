@@ -1,35 +1,66 @@
 import { Router, Request, Response as ExpressResponse, NextFunction } from 'express';
 import { OutboxStatus } from '@prisma/client';
-import { createHash } from 'crypto';
+import { createHash, timingSafeEqual } from 'crypto';
 import { prisma } from '../lib/prisma';
 import { getWhatsAppProvider } from '../whatsapp';
 import { getIO, emitToCompany } from '../socket';
-import { getCurrentSettings } from '../services/businessHoursService';
+import { getCurrentSettings, isWithinBusinessHours, wasAutomaticMessageSentToday } from '../services/businessHoursService';
 import { metaCloudConfig } from '../whatsapp/config/metaCloud.config';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { getCompanyId } from '../lib/tenant';
+import { env } from '../config/env';
+import { requireAdminOrSupervisor } from '../middlewares/authorization.middleware';
 import { currentWhatsAppProvider, retryFailedOutbox, sendTextWithOutbox } from '../services/whatsappOutbox.service';
 import { verifyMetaSignature } from '../whatsapp/security/verifyMetaSignature';
 import { rateLimit } from '../middlewares/rateLimit.middleware';
+import { scheduleConversationFallback } from '../services/conversationFallback.service';
+import { invalidateProviderUnreadCounts } from '../services/providerUnread.service';
+import { normalizePhone, phoneAliases } from '../lib/phone';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
-const muriloApiBaseUrl = (process.env.MURILO_WHATSAPP_API_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+const muriloApiBaseUrl = env.muriloApiBaseUrl;
 
-function requireWhatsAppAdmin(req: Request, res: ExpressResponse, next: NextFunction) {
-    if (!['ADMIN', 'SUPERVISOR'].includes(req.user?.role || '')) {
-        return res.status(403).json({ error: 'Apenas administradores ou supervisores podem gerenciar o WhatsApp.' });
-    }
-    next();
+type ParsedWebhook = Awaited<ReturnType<typeof whatsappProvider.parseIncoming>>;
+type ParsedWebhookMessage = ParsedWebhook['messages'][number];
+
+function isMessageMutation(message: ParsedWebhookMessage) {
+    return message.event === 'DELETE' || message.event === 'EDIT' || message.event === 'REACTION';
+}
+
+function providerContactName(value?: string | null): string | null {
+    if (!value?.trim()) return null;
+    const normalized = value.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (normalized.includes('suporte sigma') || normalized.includes('sigma pdv')) return null;
+    return value.trim();
+}
+
+function providerMessageId(value: string): string {
+    return value.includes(':') ? value.split(':').at(-1) || value : value;
+}
+
+function extractSatisfactionRating(body: string | null | undefined): number | null {
+    const match = /^\s*(10|[1-9])\s*$/.exec(body || '');
+    return match ? Number(match[1]) : null;
+}
+
+function inboundProviderMessageId(rawPayload: any, phone: string, message: ParsedWebhookMessage): string {
+    return message.waMessageId || stableInboundMessageId(rawPayload, phone, message);
+}
+
+function secretMatches(received: unknown, expected: string): boolean {
+    if (!expected || typeof received !== 'string') return false;
+    const receivedBuffer = Buffer.from(received);
+    const expectedBuffer = Buffer.from(expected);
+    return receivedBuffer.length === expectedBuffer.length && timingSafeEqual(receivedBuffer, expectedBuffer);
 }
 
 function internalOrAdminAuth(req: Request, res: ExpressResponse, next: NextFunction) {
-    const internalToken = process.env.SIGMA_INTERNAL_TOKEN;
-    if (internalToken && req.headers['x-internal-token'] === internalToken) {
+    if (env.internalToken && req.headers['x-internal-token'] === env.internalToken) {
         (req as any).isInternalServiceCall = true;
         return next();
     }
-    authMiddleware(req, res, () => requireWhatsAppAdmin(req, res, next));
+    authMiddleware(req, res, () => requireAdminOrSupervisor(req, res, next));
 }
 
 // Cache em memória — evita query ao banco a cada webhook recebido
@@ -38,7 +69,7 @@ let _cachedWebhookCompanyId: string | null = null;
 async function getWebhookCompanyId(): Promise<string> {
     if (_cachedWebhookCompanyId) return _cachedWebhookCompanyId;
 
-    const configuredCompanyId = process.env.DEFAULT_COMPANY_ID || process.env.SIGMA_DEFAULT_COMPANY_ID;
+    const configuredCompanyId = env.defaultCompanyId;
 
     if (configuredCompanyId) {
         const configuredCompany = await prisma.company.findUnique({
@@ -66,20 +97,6 @@ async function getWebhookCompanyId(): Promise<string> {
 
     _cachedWebhookCompanyId = company.id;
     return _cachedWebhookCompanyId;
-}
-
-async function clearWhatsAppOperationalData(companyId: string): Promise<void> {
-    await prisma.$transaction([
-        prisma.ticketTimeline.deleteMany({ where: { companyId } }),
-        prisma.ticketEvaluation.deleteMany({ where: { companyId } }),
-        prisma.ticketFieldService.deleteMany({ where: { companyId } }),
-        prisma.message.deleteMany({ where: { companyId } }),
-        prisma.ticket.deleteMany({ where: { companyId } }),
-        prisma.conversation.deleteMany({ where: { companyId } }),
-        prisma.whatsAppOutbox.deleteMany({ where: { companyId } }),
-        prisma.whatsAppInboundEvent.deleteMany({ where: { companyId } }),
-        prisma.counter.deleteMany({ where: { companyId } }),
-    ]);
 }
 
 function fromWhatsAppTimestamp(timestamp?: number | null): Date | undefined {
@@ -114,19 +131,32 @@ function stableInboundMessageId(
     return `in_${hash}`;
 }
 
-router.get('/sessions', authMiddleware, requireWhatsAppAdmin, async (_req: Request, res: ExpressResponse) => {
+router.get('/sessions', authMiddleware, requireAdminOrSupervisor, async (_req: Request, res: ExpressResponse) => {
     try {
         const sessions = await whatsappProvider.listSessions();
-        res.json(sessions);
+        res.json(sessions.map((session) => ({ ...session, provider: process.env.WHATSAPP_PROVIDER || 'mock' })));
     } catch (error: any) {
         res.status(500).json({ error: error?.message ?? 'Failed to list WhatsApp sessions' });
     }
 });
 
-router.post('/sessions/:sessionId/start', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.get('/groups', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
-        const companyId = getCompanyId(req);
-        await clearWhatsAppOperationalData(companyId);
+        getCompanyId(req);
+        if (!whatsappProvider.listGroups) {
+            return res.status(501).json({ error: 'O provider WhatsApp atual nÃ£o suporta listagem de grupos.' });
+        }
+        const limit = Math.max(1, Math.min(Number(req.query.limit || 500), 500));
+        const groups = await whatsappProvider.listGroups({ limit });
+        res.json(groups);
+    } catch (error: any) {
+        res.status(500).json({ error: error?.message ?? 'Erro ao listar grupos do WhatsApp' });
+    }
+});
+
+router.post('/sessions/:sessionId/start', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
+    try {
+        getCompanyId(req);
         await whatsappProvider.createSession(req.params.sessionId);
         res.status(202).json({ ok: true });
     } catch (error: any) {
@@ -134,7 +164,7 @@ router.post('/sessions/:sessionId/start', authMiddleware, requireWhatsAppAdmin, 
     }
 });
 
-router.post('/sessions/:sessionId/disconnect', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.post('/sessions/:sessionId/disconnect', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
         await whatsappProvider.disconnectSession(req.params.sessionId);
         res.status(200).json({ ok: true, status: 'DISCONNECTED' });
@@ -148,38 +178,51 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
         const companyId = (req as any).isInternalServiceCall
             ? await getWebhookCompanyId()
             : getCompanyId(req);
-        const chatLimit = Math.max(1, Math.min(Number(req.body?.chatLimit || req.query.chatLimit || 100), 500));
-        const messageLimit = Math.max(1, Math.min(Number(req.body?.messageLimit || req.query.messageLimit || 50), 200));
+        const chatLimit = Math.max(1, Math.min(Number(req.body?.chatLimit || req.query.chatLimit || 500), 500));
+        const messageLimit = Math.max(1, Math.min(Number(req.body?.messageLimit || req.query.messageLimit || 1000), 1000));
         const chats = await whatsappProvider.syncHistory({
             sessionId: req.params.sessionId,
             chatLimit,
             messageLimit,
+            phone: typeof req.body?.phone === 'string' ? req.body.phone : undefined,
         });
 
         let importedContacts = 0;
         let importedConversations = 0;
         let importedMessages = 0;
+        let historyRequests = 0;
+        const requestOlder = req.body?.requestOlder === true;
 
         for (const chat of chats) {
-            const phone = String(chat.phone || '').replace(/\D/g, '');
+            const phone = normalizePhone(chat.phone);
             if (phone.length < 10) continue;
+            const chatName = providerContactName(chat.name);
 
-            let contact = await prisma.contact.findFirst({ where: { companyId, phone } });
+            let contact = await prisma.contact.findFirst({
+                where: { companyId, phone: { in: phoneAliases(chat.phone) } },
+                orderBy: { createdAt: 'asc' },
+            });
             if (!contact) {
                 contact = await prisma.contact.create({
                     data: {
                         companyId,
                         phone,
-                        name: chat.name || null,
+                        name: chatName,
+                        avatarUrl: chat.avatarUrl || null,
                     },
                 });
                 importedContacts += 1;
-            } else if (contact.companyId !== companyId || (chat.name && contact.name !== chat.name)) {
+            } else if (
+                contact.companyId !== companyId ||
+                contact.phone !== phone ||
+                (chat.avatarUrl && contact.avatarUrl !== chat.avatarUrl)
+            ) {
                 contact = await prisma.contact.update({
                     where: { id: contact.id },
                     data: {
                         companyId,
-                        ...(chat.name && contact.name !== chat.name ? { name: chat.name } : {}),
+                        phone,
+                        ...(chat.avatarUrl && contact.avatarUrl !== chat.avatarUrl ? { avatarUrl: chat.avatarUrl } : {}),
                     },
                 });
             }
@@ -187,8 +230,6 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
             const sortedMessages = [...chat.messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             const firstMessageAt = fromWhatsAppTimestamp(sortedMessages[0]?.timestamp);
             const lastMessageAt = fromWhatsAppTimestamp(chat.lastMessageAt) || fromWhatsAppTimestamp(sortedMessages[sortedMessages.length - 1]?.timestamp) || new Date();
-            const shouldEnterQueue = Boolean(chat.unreadCount && chat.unreadCount > 0);
-
             let conversation = await prisma.conversation.findFirst({
                 where: {
                     companyId,
@@ -202,23 +243,32 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
                     data: {
                         companyId,
                         contactId: contact.id,
-                        status: shouldEnterQueue ? 'OPEN' : 'CLOSED',
+                        // A sincronização traz o acervo do WhatsApp. Mensagens não
+                        // lidas no aparelho não significam um atendimento ativo no CRM.
+                        status: 'CLOSED',
                         startedAt: firstMessageAt || lastMessageAt,
-                        closedAt: shouldEnterQueue ? null : lastMessageAt,
+                        closedAt: lastMessageAt,
                         lastMessageAt,
                     },
                 });
                 importedConversations += 1;
             } else {
+                const effectiveLastMessageAt = conversation.lastMessageAt && conversation.lastMessageAt > lastMessageAt
+                    ? conversation.lastMessageAt
+                    : lastMessageAt;
                 conversation = await prisma.conversation.update({
                     where: { id: conversation.id },
                     data: {
-                        status: shouldEnterQueue && conversation.status === 'CLOSED' ? 'OPEN' : conversation.status,
-                        closedAt: shouldEnterQueue ? null : conversation.closedAt,
-                        lastMessageAt,
+                        // Nunca reabre uma conversa durante a importação. Se já
+                        // existe atendimento ativo, ele é preservado como está.
+                        lastMessageAt: effectiveLastMessageAt,
                     },
                 });
             }
+
+            // Conversas históricas já encerradas entram apenas como referência
+            // operacional; o conteúdo não volta a ser persistido após a retenção.
+            if (conversation.status === 'CLOSED') continue;
 
             const messageIds = sortedMessages
                 .map((message, index) => message.waMessageId || `history_${phone}_${message.timestamp || index}_${message.direction}`)
@@ -274,6 +324,16 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
                         body: message.body || null,
                         mediaUrl: message.mediaUrl || null,
                         waMessageId,
+                        replyToMessageId: message.replyToProviderMessageId
+                            ? (await prisma.message.findFirst({
+                                where: {
+                                    companyId,
+                                    conversationId: conversation.id,
+                                    waMessageId: providerMessageId(message.replyToProviderMessageId),
+                                },
+                                select: { id: true },
+                            }))?.id
+                            : null,
                         createdAt: messageCreatedAt || undefined,
                     },
                 });
@@ -295,9 +355,15 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
 
             if (updatedConversation) {
                 emitToCompany(updatedConversation.companyId, 'conversation:updated', updatedConversation);
-                if (shouldEnterQueue) {
-                    emitToCompany(updatedConversation.companyId, 'conversation:new', updatedConversation);
-                }
+            }
+
+            if (requestOlder && whatsappProvider.requestHistorySync) {
+                await whatsappProvider.requestHistorySync({
+                    phone,
+                    messageId: sortedMessages[0]?.waMessageId || undefined,
+                    count: 100,
+                });
+                historyRequests += 1;
             }
         }
 
@@ -307,6 +373,7 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
             importedContacts,
             importedConversations,
             importedMessages,
+            historyRequests,
         });
     } catch (error: any) {
         console.error('Error syncing WhatsApp history:', error);
@@ -314,11 +381,17 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
     }
 });
 
-router.get('/sessions/:sessionId/qrcode', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.get('/sessions/:sessionId/qrcode', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
         const provider = process.env.WHATSAPP_PROVIDER || 'mock';
-        if (provider !== 'murilo-api' && provider !== 'evolution') {
-            return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api ou evolution' });
+        if (provider !== 'murilo-api' && provider !== 'evolution' && provider !== 'uazapi') {
+            return res.status(400).json({ error: 'QR Code não está disponível para o provedor atual' });
+        }
+
+        if (provider === 'uazapi') {
+            const qrCode = await whatsappProvider.getQrCode?.();
+            if (!qrCode) return res.status(409).json({ error: 'QR Code ainda não disponível. Aguarde alguns segundos e tente novamente.' });
+            return res.json({ qrCode });
         }
 
         if (provider === 'evolution') {
@@ -349,11 +422,18 @@ router.get('/sessions/:sessionId/qrcode', authMiddleware, requireWhatsAppAdmin, 
     }
 });
 
-router.get('/sessions/:sessionId/qrcode-image', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.get('/sessions/:sessionId/qrcode-image', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
         const provider = process.env.WHATSAPP_PROVIDER || 'mock';
-        if (provider !== 'murilo-api' && provider !== 'evolution') {
-            return res.status(400).json({ error: 'QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api ou evolution' });
+        if (provider !== 'murilo-api' && provider !== 'evolution' && provider !== 'uazapi') {
+            return res.status(400).json({ error: 'QR Code não está disponível para o provedor atual' });
+        }
+
+
+        if (provider === 'uazapi') {
+            const qrCodeDataUrl = await whatsappProvider.getQrCode?.();
+            if (!qrCodeDataUrl) return res.status(409).json({ error: 'QR Code ainda não disponível. Aguarde alguns segundos e tente novamente.' });
+            return res.json({ qrCode: qrCodeDataUrl, qrCodeDataUrl });
         }
 
         if (provider === 'evolution') {
@@ -384,17 +464,20 @@ router.get('/sessions/:sessionId/qrcode-image', authMiddleware, requireWhatsAppA
     }
 });
 
-router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
         const provider = process.env.WHATSAPP_PROVIDER || 'mock';
-        if (provider !== 'murilo-api' && provider !== 'evolution') {
-            return res.status(400).send('QR Code só está disponível com WHATSAPP_PROVIDER=murilo-api ou evolution');
+        if (provider !== 'murilo-api' && provider !== 'evolution' && provider !== 'uazapi') {
+            return res.status(400).send('QR Code não está disponível para o provedor atual');
         }
 
         let qrCodeDataUrl: string | undefined;
         let errorMessage: string | undefined;
 
-        if (provider === 'evolution') {
+        if (provider === 'uazapi') {
+            qrCodeDataUrl = await whatsappProvider.getQrCode?.() || undefined;
+            errorMessage = qrCodeDataUrl ? undefined : 'QR Code ainda não disponível na UAZAPI';
+        } else if (provider === 'evolution') {
             const evolutionUrl = (process.env.EVOLUTION_API_URL || 'http://localhost:8080').replace(/\/$/, '');
             const apiKey = process.env.EVOLUTION_API_KEY || '';
             const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'sigma-principal';
@@ -423,12 +506,12 @@ router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireWhatsAppAd
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Conectar WhatsApp - Sigma</title>
   <style>
-    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #101622; color: #e5edf5; font-family: Inter, Arial, sans-serif; }
-    main { width: min(440px, calc(100vw - 32px)); background: #1E272E; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 28px; text-align: center; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #000000; color: #fafafa; font-family: Inter, Arial, sans-serif; }
+    main { width: min(440px, calc(100vw - 32px)); background: #111116; border: 1px solid #32303a; border-radius: 12px; padding: 28px; text-align: center; }
     h1 { margin: 0 0 8px; font-size: 24px; }
-    p { margin: 0 0 20px; color: #94a3b8; }
+    p { margin: 0 0 20px; color: #b0abb8; }
     img { width: 320px; max-width: 100%; background: #fff; border-radius: 8px; padding: 12px; }
-    code { display: inline-block; margin-top: 18px; color: #00E5E5; }
+    code { display: inline-block; margin-top: 18px; color: #c4b5fd; }
   </style>
 </head>
 <body>
@@ -445,7 +528,7 @@ router.get('/sessions/:sessionId/qrcode-page', authMiddleware, requireWhatsAppAd
     }
 });
 
-router.get('/outbox', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.get('/outbox', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
         const companyId = getCompanyId(req);
         const limit = Math.max(1, Math.min(Number(req.query.limit || 25), 100));
@@ -522,7 +605,7 @@ router.get('/outbox', authMiddleware, requireWhatsAppAdmin, async (req: Request,
     }
 });
 
-router.post('/outbox/retry', authMiddleware, requireWhatsAppAdmin, async (req: Request, res: ExpressResponse) => {
+router.post('/outbox/retry', authMiddleware, requireAdminOrSupervisor, async (req: Request, res: ExpressResponse) => {
     try {
         const companyId = getCompanyId(req);
         const limit = Math.max(1, Math.min(Number(req.body?.limit || 25), 100));
@@ -551,41 +634,234 @@ router.get(['/webhook', '/webhooks/meta'], (req: Request, res: ExpressResponse) 
 });
 
 // Processa payload do webhook em background (sem bloquear resposta HTTP)
-async function processWebhookPayload(parsed: Awaited<ReturnType<typeof whatsappProvider.parseIncoming>>, rawPayload: any) {
-    const phone = parsed.contact.phone;
-    const name = parsed.contact.name || undefined;
+async function processWebhookPayload(parsed: ParsedWebhook, rawPayload: any) {
+    const phone = normalizePhone(parsed.contact.phone);
+    if (phone.length < 10) return;
+    const hasInboundCustomerMessage = parsed.messages.some((message) => message.direction === 'INBOUND' && !isMessageMutation(message));
+    const name = hasInboundCustomerMessage ? providerContactName(parsed.contact.name) || undefined : undefined;
+    const isWhatsAppGroup = parsed.contact.isGroup === true;
     const companyId = await getWebhookCompanyId(); // cached após 1ª chamada
+    const eventType = String(rawPayload?.event || rawPayload?.EventType || rawPayload?.eventType || '').toLowerCase();
+    const isHistoryEvent = eventType.includes('history');
+    let containsOnlyMessageMutations = parsed.messages.length > 0
+        && parsed.messages.every(isMessageMutation);
 
     // Find or create Contact
-    let contact = await prisma.contact.findFirst({ where: { companyId, phone } });
+    let contact = await prisma.contact.findFirst({
+        where: { companyId, phone: { in: phoneAliases(parsed.contact.phone) } },
+        orderBy: { createdAt: 'asc' },
+    });
     if (!contact) {
-        contact = await prisma.contact.create({ data: { companyId, phone, name } });
-    } else if (name && contact.name !== name) {
-        contact = await prisma.contact.update({ where: { id: contact.id }, data: { name } });
+        if (containsOnlyMessageMutations) return;
+        try {
+            contact = await prisma.contact.create({ data: { companyId, phone, name, isWhatsAppGroup } });
+        } catch (error: any) {
+            if (error?.code !== 'P2002') throw error;
+            contact = await prisma.contact.findFirst({ where: { companyId, phone } });
+            if (!contact) throw error;
+        }
+    } else if (contact.phone !== phone || (isWhatsAppGroup && !contact.isWhatsAppGroup)) {
+        contact = await prisma.contact.update({
+            where: { id: contact.id },
+            data: {
+                ...(contact.phone !== phone ? { phone } : {}),
+                ...(isWhatsAppGroup && !contact.isWhatsAppGroup ? { isWhatsAppGroup: true } : {}),
+            },
+        });
     }
 
-    // Find or create Conversation — reabre fechadas em vez de criar duplicatas
+    // Deduplica antes de procurar/criar a conversa. Isso impede que uma segunda
+    // entrega do mesmo webhook crie um atendimento vazio. A nota da pesquisa
+    // tambem e reservada aqui, antes de qualquer abertura de atendimento.
+    const messages: ParsedWebhookMessage[] = [];
+    for (const message of parsed.messages) {
+        if (message.direction !== 'INBOUND' || isMessageMutation(message)) {
+            messages.push(message);
+            continue;
+        }
+
+        const deduplicationId = inboundProviderMessageId(rawPayload, phone, message);
+        const alreadyProcessed = await prisma.whatsAppInboundEvent.findFirst({
+            where: {
+                provider: currentWhatsAppProvider(),
+                providerMessageId: deduplicationId,
+            },
+            select: { id: true },
+        });
+        if (alreadyProcessed) continue;
+
+        const rating = message.type === 'TEXT' ? extractSatisfactionRating(message.body) : null;
+        if (rating !== null) {
+            const pendingRating = await prisma.conversation.findFirst({
+                where: {
+                    companyId,
+                    contactId: contact.id,
+                    status: 'CLOSED',
+                    ratingRequestedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+                    ratedAt: null,
+                },
+                orderBy: { closedAt: 'desc' },
+                select: { id: true },
+            });
+
+            if (pendingRating) {
+                try {
+                    const recordedRating = await prisma.$transaction(async (tx) => {
+                        const inboundEvent = await tx.whatsAppInboundEvent.create({
+                            data: {
+                                companyId,
+                                provider: currentWhatsAppProvider(),
+                                providerMessageId: deduplicationId,
+                                fromPhone: phone,
+                                conversationId: pendingRating.id,
+                                rawPayload: { kind: 'satisfaction_rating' },
+                            },
+                        });
+                        const occurredAt = fromWhatsAppTimestamp(message.timestamp) || new Date();
+                        const updated = await tx.conversation.updateMany({
+                            where: { id: pendingRating.id, companyId, status: 'CLOSED', ratedAt: null },
+                            data: { rating, ratedAt: occurredAt, lastMessageAt: occurredAt },
+                        });
+                        if (updated.count !== 1) {
+                            await tx.whatsAppInboundEvent.update({
+                                where: { id: inboundEvent.id },
+                                data: { processedAt: new Date() },
+                            });
+                            return null;
+                        }
+                        await tx.conversationReport.updateMany({
+                            where: { companyId, conversationId: pendingRating.id },
+                            data: { rating, ratedAt: occurredAt },
+                        });
+                        await tx.whatsAppInboundEvent.update({
+                            where: { id: inboundEvent.id },
+                            data: { processedAt: new Date() },
+                        });
+                        return { conversationId: pendingRating.id, rating, ratedAt: occurredAt };
+                    });
+
+                    if (recordedRating) {
+                        emitToCompany(companyId, 'conversation:updated', {
+                            id: recordedRating.conversationId,
+                            rating: recordedRating.rating,
+                            ratedAt: recordedRating.ratedAt,
+                        });
+                    }
+                } catch (error: any) {
+                    // Outro consumidor reservou o mesmo evento primeiro.
+                    if (error?.code !== 'P2002') throw error;
+                }
+                continue;
+            }
+        }
+
+        messages.push(message);
+    }
+
+    if (messages.length === 0) return;
+    containsOnlyMessageMutations = messages.every(isMessageMutation);
+    const providerTimestamps = messages.map((message) => message.timestamp || 0).filter(Boolean);
+    const firstProviderAt = fromWhatsAppTimestamp(providerTimestamps.length ? Math.min(...providerTimestamps) : 0);
+    const lastProviderAt = fromWhatsAppTimestamp(providerTimestamps.length ? Math.max(...providerTimestamps) : 0);
+
+    // Find or create Conversation.
+    // Regra do produto: se o contato voltar depois de um atendimento encerrado,
+    // cria sempre um novo atendimento em vez de reabrir o anterior.
     let conversation = await prisma.conversation.findFirst({
-        where: { companyId, contactId: contact.id },
+        where: {
+            companyId,
+            contactId: contact.id,
+            ...(isHistoryEvent || containsOnlyMessageMutations ? {} : { status: { not: 'CLOSED' as const } }),
+        },
         orderBy: { createdAt: 'desc' },
     });
 
     let isNewConversation = false;
     let hasInbound = false;
+    let createdMessageCount = 0;
     if (!conversation) {
-        conversation = await prisma.conversation.create({
-            data: { companyId, contactId: contact.id, status: 'OPEN', startedAt: new Date() },
-        });
-        isNewConversation = true;
-    } else if (conversation.status === 'CLOSED') {
-        conversation = await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { status: 'OPEN', closedAt: null, startedAt: new Date() },
-        });
-        isNewConversation = true;
+        if (containsOnlyMessageMutations) return;
+        try {
+            conversation = await prisma.conversation.create({
+                data: {
+                    companyId,
+                    contactId: contact.id,
+                    status: isHistoryEvent ? 'CLOSED' : 'OPEN',
+                    startedAt: firstProviderAt || new Date(),
+                    closedAt: isHistoryEvent ? (lastProviderAt || new Date()) : null,
+                },
+            });
+            isNewConversation = true;
+        } catch (error: any) {
+            if (error?.code !== 'P2002' || isHistoryEvent) throw error;
+            conversation = await prisma.conversation.findFirst({
+                where: { companyId, contactId: contact.id, status: { not: 'CLOSED' } },
+                orderBy: { createdAt: 'desc' },
+            });
+            if (!conversation) throw error;
+        }
     }
 
-    for (const msg of parsed.messages) {
+    for (const msg of messages) {
+        // Reações pertencem a uma mensagem existente. Enquanto não houver uma
+        // representação própria para elas, apenas as ignoramos: nunca devem
+        // virar texto, aumentar não lidas ou iniciar um novo atendimento.
+        if (msg.event === 'REACTION') continue;
+
+        if ((msg.event === 'DELETE' || msg.event === 'EDIT') && msg.waMessageId) {
+            const shortProviderMessageId = providerMessageId(msg.waMessageId);
+            const existing = await prisma.message.findFirst({
+                where: {
+                    companyId,
+                    OR: [
+                        { waMessageId: msg.waMessageId },
+                        { waMessageId: shortProviderMessageId },
+                        { waMessageId: { endsWith: `:${shortProviderMessageId}` } },
+                    ],
+                },
+            });
+
+            if (existing) {
+                const message = await prisma.message.update({
+                    where: { id: existing.id },
+                    data: msg.event === 'DELETE'
+                        ? {
+                            deletedAt: new Date(),
+                            deletedByCustomer: existing.direction === 'INBOUND',
+                        }
+                        : {
+                            ...(msg.body ? { body: msg.body } : {}),
+                            editedAt: new Date(),
+                        },
+                    include: {
+                        user: {
+                            select: {
+                                id: true,
+                                name: true,
+                                role: true,
+                                specialty: true,
+                                department: { select: { name: true } },
+                            },
+                        },
+                        replyToMessage: true,
+                    },
+                });
+                getIO().to(`conversation:${existing.conversationId}`).emit('message:updated', message);
+            }
+            continue;
+        }
+
+        const replyToMessage = msg.replyToProviderMessageId
+            ? await prisma.message.findFirst({
+                where: {
+                    companyId,
+                    conversationId: conversation.id,
+                    waMessageId: providerMessageId(msg.replyToProviderMessageId),
+                },
+                select: { id: true },
+            })
+            : null;
+
         if (msg.direction === 'OUTBOUND') {
             if (!msg.waMessageId) continue;
             const existing = await prisma.message.findFirst({
@@ -593,32 +869,58 @@ async function processWebhookPayload(parsed: Awaited<ReturnType<typeof whatsappP
             });
             if (existing) continue;
             const message = await prisma.message.create({
-                data: { companyId, conversationId: conversation.id, direction: 'OUTBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId },
+                data: { companyId, conversationId: conversation.id, direction: 'OUTBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId, replyToMessageId: replyToMessage?.id, createdAt: fromWhatsAppTimestamp(msg.timestamp) },
+                include: { replyToMessage: true },
             });
+            createdMessageCount += 1;
             getIO().to(`conversation:${conversation.id}`).emit('message:new', message);
             continue;
         }
 
-        // INBOUND — deduplicação via whatsAppInboundEvent
-        let inboundEvent;
+        // INBOUND — reserva do evento, mensagem e contagem precisam ser atômicas.
+        // Se qualquer etapa falhar, nenhuma delas fica parcialmente gravada.
+        let inboundResult;
         try {
-            inboundEvent = await prisma.whatsAppInboundEvent.create({
-                data: {
-                    companyId,
-                    provider: currentWhatsAppProvider(),
-                    providerMessageId: msg.waMessageId || stableInboundMessageId(rawPayload, phone, msg),
-                    fromPhone: phone,
-                    rawPayload,
-                },
+            inboundResult = await prisma.$transaction(async (tx) => {
+                const inboundEvent = await tx.whatsAppInboundEvent.create({
+                    data: {
+                        companyId,
+                        provider: currentWhatsAppProvider(),
+                        providerMessageId: msg.waMessageId || stableInboundMessageId(rawPayload, phone, msg),
+                        fromPhone: phone,
+                        conversationId: conversation.id,
+                        rawPayload,
+                    },
+                });
+                const message = await tx.message.create({
+                    data: { companyId, conversationId: conversation.id, direction: 'INBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId, replyToMessageId: replyToMessage?.id, createdAt: fromWhatsAppTimestamp(msg.timestamp) },
+                    include: { replyToMessage: true },
+                });
+                let unreadCount: number | null = null;
+                if (!isHistoryEvent) {
+                    const unreadConversation = await tx.conversation.update({
+                        where: { id: conversation.id },
+                        data: { unreadCount: { increment: 1 } },
+                        select: { unreadCount: true },
+                    });
+                    unreadCount = unreadConversation.unreadCount;
+                }
+                return { inboundEvent, message, unreadCount };
             });
         } catch (error: any) {
             if (error?.code === 'P2002') continue; // mensagem duplicada
             throw error;
         }
+        const { inboundEvent, message, unreadCount } = inboundResult;
+        createdMessageCount += 1;
 
-        const message = await prisma.message.create({
-            data: { companyId, conversationId: conversation.id, direction: 'INBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId },
-        });
+        if (unreadCount !== null) {
+            invalidateProviderUnreadCounts();
+            console.info('[SIGMA] Nova mensagem pendente contabilizada', {
+                conversationId: conversation.id,
+                unreadCount,
+            });
+        }
 
         hasInbound = true;
 
@@ -629,24 +931,119 @@ async function processWebhookPayload(parsed: Awaited<ReturnType<typeof whatsappP
         prisma.whatsAppInboundEvent.update({ where: { id: inboundEvent.id }, data: { processedAt: new Date() } }).catch(() => {});
     }
 
-    // Atualiza lastMessageAt e emite update de conversa (leve, sem includes)
-    await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
-    emitToCompany(companyId, 'conversation:updated', { id: conversation.id, lastMessageAt: new Date(), contactId: contact.id });
+    // Confirmações de entrega, edições e exclusões atualizam mensagens existentes,
+    // mas não devem reordenar a conversa nem criar contagem de não lidas.
+    if (createdMessageCount === 0) return;
 
-    if (isNewConversation) {
+    // Atualiza lastMessageAt e emite a conversa completa para a lista do atendente
+    // refletir a nova mensagem sem depender de polling.
+    const latestProviderTimestamp = Math.max(0, ...messages.map((message) => message.timestamp || 0));
+    const providerLastMessageAt = fromWhatsAppTimestamp(latestProviderTimestamp) || new Date();
+    const lastMessageAt = conversation.lastMessageAt && conversation.lastMessageAt > providerLastMessageAt
+        ? conversation.lastMessageAt
+        : providerLastMessageAt;
+    const updatedConversation = await prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt },
+        include: {
+            contact: true,
+            assignedUser: { select: { id: true, name: true, email: true } },
+            department: { select: { id: true, name: true } },
+            serviceTopic: { select: { id: true, name: true } },
+            messages: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: {
+                    id: true,
+                    direction: true,
+                    type: true,
+                    body: true,
+                    createdAt: true,
+                    waMessageId: true,
+                },
+            },
+        },
+    });
+    emitToCompany(companyId, 'conversation:updated', updatedConversation);
+
+    if (isNewConversation && !isHistoryEvent) {
         emitToCompany(companyId, 'conversation:new', { id: conversation.id, contactId: contact.id, contact, status: 'OPEN' });
+        scheduleConversationFallback({ conversationId: conversation.id, companyId });
+    }
 
+    if (!isHistoryEvent && hasInbound) {
         // Mensagem de boas-vindas — só se o cliente enviou (INBOUND) e não é grupo
         try {
             const settings = await getCurrentSettings(companyId);
-            if (settings.welcomeMessage && hasInbound) {
-                const systemMsg = await prisma.message.create({
-                    data: { companyId, conversationId: conversation.id, direction: 'SYSTEM', type: 'TEXT', body: settings.welcomeMessage },
+            const now = new Date();
+            const withinBusinessHours = isWithinBusinessHours(now, settings);
+            const automaticBody = (withinBusinessHours ? settings.welcomeMessage : settings.awayMessage)?.trim();
+            const previousMarker = withinBusinessHours ? conversation.lastWelcomeSentAt : conversation.lastAwaySentAt;
+
+            // Grupos nunca recebem respostas automaticas. Em contatos individuais,
+            // a preferencia desativa somente a saudacao de boas-vindas.
+            if (contact.isWhatsAppGroup || (withinBusinessHours && !contact.welcomeMessageEnabled)) return;
+            if (!automaticBody || wasAutomaticMessageSentToday(previousMarker, now)) return;
+
+            // Uma conversa já assumida por um atendente não deve receber saudação automática.
+            // A mensagem de ausência continua independente, pois informa o horário de atendimento.
+            if (withinBusinessHours) {
+                const attendantMessage = await prisma.message.findFirst({
+                    where: {
+                        companyId,
+                        conversationId: conversation.id,
+                        direction: 'OUTBOUND',
+                    },
+                    select: { id: true },
                 });
-                getIO().to(`conversation:${conversation.id}`).emit('message:new', systemMsg);
-                getWhatsAppProvider().sendText({ to: phone, body: settings.welcomeMessage }).catch((err) => {
-                    console.error('[SIGMA] Falha ao enviar mensagem de boas-vindas:', err);
+                if (attendantMessage) return;
+            }
+
+            const claim = withinBusinessHours
+                ? await prisma.conversation.updateMany({
+                    where: { id: conversation.id, companyId, lastWelcomeSentAt: previousMarker },
+                    data: { lastWelcomeSentAt: now },
+                })
+                : await prisma.conversation.updateMany({
+                    where: { id: conversation.id, companyId, lastAwaySentAt: previousMarker },
+                    data: { lastAwaySentAt: now },
                 });
+            if (claim.count !== 1) return;
+
+            let systemMessageId: string | null = null;
+            try {
+                const systemMessage = await prisma.message.create({
+                    data: { companyId, conversationId: conversation.id, direction: 'SYSTEM', type: 'TEXT', body: automaticBody },
+                });
+                systemMessageId = systemMessage.id;
+                const sent = await sendTextWithOutbox({
+                    companyId,
+                    conversationId: conversation.id,
+                    messageId: systemMessage.id,
+                    toPhone: phone,
+                    body: automaticBody,
+                });
+                const persistedMessage = await prisma.message.update({
+                    where: { id: systemMessage.id },
+                    data: { waMessageId: sent.waMessageId },
+                });
+                getIO().to(`conversation:${conversation.id}`).emit('message:new', persistedMessage);
+            } catch (sendError) {
+                if (systemMessageId) {
+                    await prisma.message.delete({ where: { id: systemMessageId } }).catch(() => {});
+                }
+                if (withinBusinessHours) {
+                    await prisma.conversation.updateMany({
+                        where: { id: conversation.id, companyId, lastWelcomeSentAt: now },
+                        data: { lastWelcomeSentAt: previousMarker },
+                    });
+                } else {
+                    await prisma.conversation.updateMany({
+                        where: { id: conversation.id, companyId, lastAwaySentAt: now },
+                        data: { lastAwaySentAt: previousMarker },
+                    });
+                }
+                throw sendError;
             }
         } catch (err) {
             console.error('[SIGMA] Falha na mensagem automática:', err);
@@ -654,25 +1051,51 @@ async function processWebhookPayload(parsed: Awaited<ReturnType<typeof whatsappP
     }
 }
 
-// Main Webhook endpoint for Meta Cloud API messages and events
-async function processIncomingWebhook(req: Request, res: ExpressResponse) {
-    // Só valida em provider real (meta-cloud e evolution). Mock/debug continuam livres.
-    if ((process.env.WHATSAPP_PROVIDER || 'mock') === 'meta-cloud') {
+function authenticatePublicWebhook(req: Request, res: ExpressResponse, next: NextFunction) {
+    const provider = process.env.WHATSAPP_PROVIDER?.trim().toLowerCase();
+    if (!provider || provider === 'mock') {
+        return res.status(503).json({ error: 'Public webhook is not configured' });
+    }
+
+    if (provider === 'meta-cloud') {
         const rawBody = (req as any).rawBody as Buffer | undefined;
         const signature = req.headers['x-hub-signature-256'] as string | undefined;
         if (!rawBody || !verifyMetaSignature(rawBody, signature)) {
             console.warn('[SIGMA] Webhook rejeitado: assinatura inválida.');
             return res.status(401).json({ error: 'Invalid signature' });
         }
-    } else if ((process.env.WHATSAPP_PROVIDER || 'mock') === 'evolution') {
-        const evolutionToken = process.env.EVOLUTION_WEBHOOK_TOKEN;
+    } else if (provider === 'evolution') {
+        const evolutionToken = process.env.EVOLUTION_WEBHOOK_TOKEN || '';
         const queryToken = req.query.token as string | undefined;
-        if (evolutionToken && queryToken !== evolutionToken) {
+        const headerToken = req.headers['x-webhook-token'];
+        if (!secretMatches(queryToken ?? headerToken, evolutionToken)) {
             console.warn('[SIGMA] Webhook rejeitado: token da Evolution inválido.');
             return res.status(401).json({ error: 'Invalid token' });
         }
+    } else if (provider === 'uazapi') {
+        const receivedToken =
+            req.headers['x-webhook-token'] ||
+            req.headers['x-signature'] ||
+            req.query.token;
+        if (!secretMatches(receivedToken, env.uazapiWebhookSecret)) {
+            console.warn('[SIGMA] Webhook rejeitado: token da UAZAPI invalido.');
+            return res.status(401).json({ error: 'Invalid token' });
+        }
+    } else if (provider === 'murilo-api') {
+        if (!secretMatches(req.headers['x-internal-token'], env.internalToken)) {
+            return res.status(401).json({ error: 'Invalid token' });
+        }
+    } else {
+        return res.status(503).json({ error: 'Unsupported webhook provider' });
     }
 
+    return next();
+}
+
+// Main Webhook endpoint for messages and events. Authentication is performed
+// by authenticatePublicWebhook on public routes; the authenticated mock route
+// deliberately bypasses it for local diagnostics.
+async function processIncomingWebhook(req: Request, res: ExpressResponse) {
     try {
         const payload = req.body;
 
@@ -684,8 +1107,11 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
             try {
                 const parsed = await whatsappProvider.parseIncoming(payload);
 
-                if (process.env.EVOLUTION_DEBUG_WEBHOOK === 'true' && parsed.messages.length > 0) {
-                    console.log('[SIGMA Webhook] parsed messages:', parsed.messages.map(m => ({
+                const batches = parsed.batches?.length ? parsed.batches : [{ contact: parsed.contact, messages: parsed.messages }];
+                const allMessages = batches.flatMap((batch) => batch.messages);
+
+                if (process.env.EVOLUTION_DEBUG_WEBHOOK === 'true' && allMessages.length > 0) {
+                    console.log('[SIGMA Webhook] parsed messages:', allMessages.map(m => ({
                         type: m.type,
                         hasMedia: !!m.mediaUrl,
                         mediaLen: m.mediaUrl?.length ?? 0,
@@ -693,9 +1119,11 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
                     })));
                 }
 
-                if (parsed.messages.length === 0) return;
+                if (allMessages.length === 0) return;
 
-                await processWebhookPayload(parsed, payload);
+                for (const batch of batches) {
+                    if (batch.messages.length) await processWebhookPayload(batch, payload);
+                }
             } catch (err) {
                 console.error('[SIGMA] Erro ao processar webhook em background:', err);
             }
@@ -706,8 +1134,8 @@ async function processIncomingWebhook(req: Request, res: ExpressResponse) {
     }
 }
 
-router.post(['/webhook', '/webhooks/meta'], rateLimit(60_000, 300, () => 'webhook-global'), processIncomingWebhook);
-router.post('/debug/mock-whatsapp/incoming', authMiddleware, requireWhatsAppAdmin, processIncomingWebhook);
+router.post(['/webhook', '/webhooks/meta'], rateLimit(60_000, 300, () => 'webhook-global'), authenticatePublicWebhook, processIncomingWebhook);
+router.post('/debug/mock-whatsapp/incoming', authMiddleware, requireAdminOrSupervisor, processIncomingWebhook);
 
 // ─── Meta Cloud media proxy ───────────────────────────────────────────────────
 // Media URLs returned by Meta require an Authorization header and expire in 5 min.

@@ -1,6 +1,6 @@
 import { clearAuthToken, getAuthToken } from './authToken';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3334';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 export class ApiError extends Error {
     constructor(message: string, public status: number) {
@@ -35,6 +35,18 @@ export async function apiRequest<T>(path: string, options: ApiOptions = {}): Pro
     }
 
     return payload as T;
+}
+
+export async function apiBlobRequest(path: string): Promise<Blob> {
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new ApiError(payload?.error || 'Não foi possível carregar a mídia.', response.status);
+    }
+    return response.blob();
 }
 
 export function redirectOnUnauthorized(error: unknown, navigate: (path: string) => void) {

@@ -1,7 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'sigma-secret-dev-key';
+import { env } from '../config/env';
 
 export interface AuthPayload {
     id: string;
@@ -24,7 +23,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
-        return res.status(401).json({ error: 'Token não fornecido' });
+        return res.status(401).json({ error: 'Token nao fornecido' });
     }
 
     const parts = authHeader.split(' ');
@@ -39,9 +38,9 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
         return res.status(401).json({ error: 'Token mal formatado' });
     }
 
-    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    jwt.verify(token, env.jwtSecret, (err, decoded) => {
         if (err) {
-            return res.status(401).json({ error: 'Token inválido' });
+            return res.status(401).json({ error: 'Token invalido' });
         }
 
         req.user = decoded as AuthPayload;

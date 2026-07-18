@@ -6,10 +6,18 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
 import { TableSkeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { contactDisplayName } from '../components/inbox/contactDisplayName';
 
 type CustomerStatus = 'ATIVO' | 'NEGOCIACAO' | 'INATIVO';
+
+interface CustomerBusiness {
+    id: string;
+    name: string;
+    cnpj: string;
+}
 
 interface Customer {
     id: string;
@@ -20,7 +28,9 @@ interface Customer {
     status: CustomerStatus;
     notes?: string | null;
     updatedAt: string;
+    businesses?: CustomerBusiness[];
     _count?: {
+        businesses: number;
         contacts: number;
         tickets: number;
     };
@@ -34,6 +44,7 @@ interface CustomerContact {
     email?: string | null;
     role?: string | null;
     updatedAt: string;
+    business?: CustomerBusiness | null;
     customer?: Pick<Customer, 'id' | 'name'> | null;
 }
 
@@ -61,6 +72,7 @@ interface CustomerFormState {
     city: string;
     notes: string;
     status: CustomerStatus;
+    businesses: Array<Pick<CustomerBusiness, 'name' | 'cnpj'>>;
 }
 
 const initialForm: CustomerFormState = {
@@ -70,6 +82,16 @@ const initialForm: CustomerFormState = {
     city: '',
     notes: '',
     status: 'ATIVO',
+    businesses: [],
+};
+
+const formatCnpj = (value: string) => {
+    const digits = value.replace(/\D/g, '').slice(0, 14);
+    return digits
+        .replace(/^(\d{2})(\d)/, '$1.$2')
+        .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+        .replace(/\.(\d{3})(\d)/, '.$1/$2')
+        .replace(/(\d{4})(\d)/, '$1-$2');
 };
 
 const statusStyles: Record<CustomerStatus, string> = {
@@ -91,6 +113,10 @@ export default function Customers() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [lgpdTarget, setLgpdTarget] = useState<CustomerContact | null>(null);
     const [lgpdConfirmation, setLgpdConfirmation] = useState('');
+    const lgpdDialogRef = useDialogFocus<HTMLDivElement>(Boolean(lgpdTarget), () => {
+        setLgpdTarget(null);
+        setLgpdConfirmation('');
+    });
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -152,6 +178,36 @@ export default function Customers() {
         return grouped;
     }, [contacts]);
 
+    const resetCustomerForm = () => {
+        setForm({ ...initialForm, businesses: [] });
+        setEditingId(null);
+    };
+
+    const addBusiness = () => {
+        setForm((current) => ({
+            ...current,
+            businesses: [...current.businesses, { name: '', cnpj: '' }],
+        }));
+    };
+
+    const updateBusiness = (index: number, field: 'name' | 'cnpj', value: string) => {
+        setForm((current) => ({
+            ...current,
+            businesses: current.businesses.map((business, businessIndex) => (
+                businessIndex === index
+                    ? { ...business, [field]: field === 'cnpj' ? formatCnpj(value) : value }
+                    : business
+            )),
+        }));
+    };
+
+    const removeBusiness = (index: number) => {
+        setForm((current) => ({
+            ...current,
+            businesses: current.businesses.filter((_, businessIndex) => businessIndex !== index),
+        }));
+    };
+
     const handleSubmit = async (event: FormEvent) => {
         event.preventDefault();
         setSaving(true);
@@ -164,6 +220,10 @@ export default function Customers() {
             city: form.city || null,
             notes: form.notes || null,
             status: form.status,
+            businesses: form.businesses.map((business) => ({
+                name: business.name.trim(),
+                cnpj: business.cnpj.replace(/\D/g, ''),
+            })),
         };
 
         try {
@@ -178,8 +238,7 @@ export default function Customers() {
                     body: JSON.stringify(payload),
                 });
             }
-            setForm(initialForm);
-            setEditingId(null);
+            resetCustomerForm();
             showToast({
                 title: editingId ? 'Cliente atualizado' : 'Cliente criado',
                 description: editingId ? 'As alterações do cliente foram salvas.' : 'O cliente foi cadastrado com sucesso.',
@@ -205,6 +264,10 @@ export default function Customers() {
             city: customer.city || '',
             notes: customer.notes || '',
             status: customer.status,
+            businesses: (customer.businesses || []).map((business) => ({
+                name: business.name,
+                cnpj: formatCnpj(business.cnpj),
+            })),
         });
     };
 
@@ -272,7 +335,7 @@ export default function Customers() {
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <SigmaSidebarIcon user={user} onLogout={logout} />
             <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-                <div className="mx-auto grid w-full max-w-[1440px] grid-cols-1 gap-8 p-6 lg:grid-cols-[1fr_360px] lg:p-10">
+                <div className="mx-auto grid w-full max-w-[1440px] grid-cols-1 gap-8 p-6 xl:grid-cols-[minmax(0,1fr)_420px] lg:p-10">
                     <section className="min-w-0">
                         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                             <div>
@@ -307,7 +370,7 @@ export default function Customers() {
                                 <input
                                     value={query}
                                     onChange={(event) => setQuery(event.target.value)}
-                                    placeholder="Buscar por nome, documento, segmento ou cidade"
+                                    placeholder="Buscar cliente, empresa, CNPJ, segmento ou cidade"
                                     className="w-full rounded-lg border border-border bg-surface py-2.5 pl-10 pr-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
                                 />
                             </div>
@@ -326,7 +389,7 @@ export default function Customers() {
                         {error && <div className="mb-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">{error}</div>}
 
                         <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-card">
-                            <div className="overflow-x-auto">
+                            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Lista de clientes com rolagem horizontal">
                                 <table className="w-full min-w-[820px] text-left">
                                     <thead className="border-b border-border bg-surface-alt">
                                         <tr>
@@ -361,6 +424,21 @@ export default function Customers() {
                                                 <td className="px-5 py-4">
                                                     <p className="font-semibold text-foreground">{customer.name}</p>
                                                     <p className="text-xs text-muted-foreground">{customer.document || 'Sem documento'} {customer.city ? `- ${customer.city}` : ''}</p>
+                                                    {(customer.businesses || []).length > 0 ? (
+                                                        <div className="mt-2 space-y-1">
+                                                            {(customer.businesses || []).slice(0, 2).map((business) => (
+                                                                <p key={business.id} className="truncate text-xs text-foreground">
+                                                                    <span className="font-medium">{business.name}</span>
+                                                                    <span className="text-muted-foreground"> · {formatCnpj(business.cnpj)}</span>
+                                                                </p>
+                                                            ))}
+                                                            {(customer.businesses || []).length > 2 && (
+                                                                <p className="text-[11px] text-muted-foreground">+{(customer.businesses || []).length - 2} empresas</p>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <p className="mt-2 text-[11px] text-muted-foreground">Nenhuma empresa vinculada</p>
+                                                    )}
                                                 </td>
                                                 <td className="px-5 py-4 text-sm text-muted-foreground">{customer.segment || '-'}</td>
                                                 <td className="px-5 py-4">
@@ -376,7 +454,9 @@ export default function Customers() {
                                                                 {(contactsByCustomer.get(customer.id) || []).slice(0, 3).map((contact) => (
                                                                     <div key={contact.id} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-alt px-2.5 py-2">
                                                                         <div className="min-w-0">
-                                                                            <p className="truncate text-xs font-semibold text-foreground">{contact.name || 'Contato sem nome'}</p>
+                                                                            <p className="truncate text-xs font-semibold text-foreground">
+                                                                                {contactDisplayName({ name: contact.name, phone: contact.phone }, contact.business?.name || customer.name)}
+                                                                            </p>
                                                                             <p className="truncate text-[11px] text-muted-foreground">{contact.phone}</p>
                                                                         </div>
                                                                         {canDeleteContactData && (
@@ -385,7 +465,7 @@ export default function Customers() {
                                                                                 onClick={() => openLgpdDeletion(contact)}
                                                                                 className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"
                                                                                 title="Apagar dados LGPD"
-                                                                                aria-label={`Apagar dados LGPD do contato ${contact.name || contact.phone}`}
+                                                                                aria-label={`Apagar dados LGPD do contato ${contactDisplayName({ name: contact.name, phone: contact.phone }, contact.business?.name || customer.name)}`}
                                                                             >
                                                                                 <Icon name="delete" className="size-3.5" />
                                                                             </button>
@@ -406,7 +486,7 @@ export default function Customers() {
                                                         <button
                                                             type="button"
                                                             onClick={() => editCustomer(customer)}
-                                                            className="rounded-lg p-2 text-muted-foreground hover:bg-surface-alt hover:text-primary transition-colors cursor-pointer"
+                                                            className="flex size-11 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-alt hover:text-primary"
                                                             title="Editar"
                                                             aria-label={`Editar cliente ${customer.name}`}
                                                         >
@@ -415,7 +495,7 @@ export default function Customers() {
                                                         <button
                                                             type="button"
                                                             onClick={() => deactivateCustomer(customer)}
-                                                            className="rounded-lg p-2 text-muted-foreground hover:bg-danger-soft hover:text-danger transition-colors cursor-pointer"
+                                                            className="flex size-11 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"
                                                             title="Inativar"
                                                             aria-label={`Inativar cliente ${customer.name}`}
                                                         >
@@ -443,9 +523,74 @@ export default function Customers() {
                                 <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30" />
                             </label>
                             <label className="block">
-                                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Documento</span>
-                                <input value={form.document} onChange={(event) => setForm({ ...form, document: event.target.value })} className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Documento do cliente</span>
+                                <input value={form.document} onChange={(event) => setForm({ ...form, document: event.target.value })} placeholder="CPF ou outro documento" className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30" />
                             </label>
+
+                            <section className="space-y-3 border-y border-border py-4" aria-labelledby="customer-businesses-title">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div>
+                                        <h3 id="customer-businesses-title" className="text-sm font-semibold text-foreground">Empresas e CNPJs</h3>
+                                        <p className="mt-0.5 text-xs text-muted-foreground">Vincule uma ou mais empresas a este cliente.</p>
+                                    </div>
+                                    <Button type="button" variant="outline" size="sm" onClick={addBusiness} disabled={form.businesses.length >= 20}>
+                                        <Icon name="add_business" className="size-4" />
+                                        Adicionar
+                                    </Button>
+                                </div>
+
+                                {form.businesses.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">Nenhuma empresa informada. O cadastro pode ser salvo assim ou você pode adicionar uma empresa.</p>
+                                ) : (
+                                    <div className="divide-y divide-border">
+                                        {form.businesses.map((business, index) => (
+                                            <fieldset key={index} className="space-y-3 py-4 first:pt-1 last:pb-1">
+                                                <legend className="sr-only">Empresa {index + 1}</legend>
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <p className="text-sm font-semibold text-foreground">Empresa {index + 1}</p>
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                                                        onClick={() => removeBusiness(index)}
+                                                        aria-label={`Remover empresa ${index + 1}`}
+                                                        title="Remover empresa"
+                                                    >
+                                                        <Icon name="delete" className="size-4" />
+                                                    </Button>
+                                                </div>
+                                                <label className="block">
+                                                    <span className="mb-1 block text-sm font-medium text-foreground">Nome da empresa</span>
+                                                    <input
+                                                        value={business.name}
+                                                        onChange={(event) => updateBusiness(index, 'name', event.target.value)}
+                                                        required
+                                                        maxLength={160}
+                                                        placeholder="Ex.: Sigma Tecnologia Ltda."
+                                                        className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                                    />
+                                                </label>
+                                                <label className="block">
+                                                    <span className="mb-1 block text-sm font-medium text-foreground">CNPJ</span>
+                                                    <input
+                                                        value={business.cnpj}
+                                                        onChange={(event) => updateBusiness(index, 'cnpj', event.target.value)}
+                                                        required
+                                                        inputMode="numeric"
+                                                        maxLength={18}
+                                                        pattern="[0-9]{2}[.][0-9]{3}[.][0-9]{3}/[0-9]{4}-[0-9]{2}"
+                                                        placeholder="00.000.000/0000-00"
+                                                        title="Informe um CNPJ com 14 dígitos"
+                                                        className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                                    />
+                                                </label>
+                                            </fieldset>
+                                        ))}
+                                    </div>
+                                )}
+                            </section>
+
                             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
                                 <label className="block">
                                     <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Segmento</span>
@@ -475,7 +620,7 @@ export default function Customers() {
                                     {saving ? 'Salvando...' : editingId ? 'Salvar' : 'Criar'}
                                 </Button>
                                 {editingId && (
-                                    <Button type="button" variant="outline" onClick={() => { setEditingId(null); setForm(initialForm); }}>
+                                    <Button type="button" variant="outline" onClick={resetCustomerForm}>
                                         Cancelar
                                     </Button>
                                 )}
@@ -486,7 +631,7 @@ export default function Customers() {
             </main>
 
             {lgpdTarget && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="lgpd-delete-title" aria-describedby="lgpd-delete-description">
+                <div ref={lgpdDialogRef} tabIndex={-1} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="lgpd-delete-title" aria-describedby="lgpd-delete-description">
                     <div className="w-full max-w-lg rounded-xl border border-border bg-surface p-6 shadow-card">
                         <div className="flex items-start gap-3">
                             <div className="rounded-xl bg-danger-soft p-2 text-danger">

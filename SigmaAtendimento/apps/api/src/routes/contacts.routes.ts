@@ -2,9 +2,21 @@ import { Router } from 'express';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { companyScope } from '../lib/tenant';
+import { getWhatsAppProvider } from '../whatsapp';
+import { normalizePhone, phoneAliases } from '../lib/phone';
 
 const router = Router();
 router.use(authMiddleware); // tenancy (ADR-02)
+const whatsappProvider = getWhatsAppProvider();
+
+const contactCompanyInclude = {
+    business: true,
+    customer: {
+        include: {
+            businesses: { orderBy: { name: 'asc' as const } },
+        },
+    },
+} as const;
 
 // List contacts (escopado por empresa)
 router.get('/', async (req, res) => {
@@ -23,7 +35,7 @@ router.get('/', async (req, res) => {
         }
         const contacts = await prisma.contact.findMany({
             where,
-            include: { customer: true },
+            include: contactCompanyInclude,
             orderBy: { updatedAt: 'desc' },
             take,
         });
@@ -39,33 +51,86 @@ router.get('/:id', async (req, res) => {
         const contact = await prisma.contact.findFirst({
             where: { id: req.params.id, ...companyScope(req) },
             include: {
-                customer: true,
+                ...contactCompanyInclude,
                 conversations: { orderBy: { createdAt: 'desc' }, take: 5 },
                 tickets: { orderBy: { createdAt: 'desc' }, take: 5 },
             },
         });
         if (!contact) return res.status(404).json({ error: 'Contact not found' });
-        const normalizedPhone = contact.phone.replace(/\D/g, '');
         res.json(contact);
     } catch (error: any) {
         res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to fetch contact' });
     }
 });
 
+// Resolves and caches the WhatsApp photo while keeping the provider token server-side.
+router.get('/:id/avatar', async (req, res) => {
+    try {
+        const contact = await prisma.contact.findFirst({
+            where: { id: req.params.id, ...companyScope(req) },
+            select: { id: true, phone: true, avatarUrl: true },
+        });
+        if (!contact) return res.status(404).json({ error: 'Contact not found' });
+        const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+        if (contact.avatarUrl && !refresh) return res.json({ avatarUrl: contact.avatarUrl });
+        if (!whatsappProvider.getProfilePictureUrl) return res.json({ avatarUrl: null });
+
+        const avatarUrl = await whatsappProvider.getProfilePictureUrl({ phone: contact.phone });
+        if (avatarUrl) {
+            await prisma.contact.update({ where: { id: contact.id }, data: { avatarUrl } });
+        }
+        res.json({ avatarUrl });
+    } catch (error: any) {
+        res.status(502).json({ error: error?.message || 'N\u00e3o foi poss\u00edvel obter a foto do contato.' });
+    }
+});
+
 // Create
 router.post('/', async (req, res) => {
     try {
-        const { name, phone, email, role, notes, customerId } = req.body ?? {};
+        const { name, phone, email, role, notes, customerId, businessId, welcomeMessageEnabled, includeInServiceReports } = req.body ?? {};
         if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+        const normalizedPhone = normalizePhone(phone);
+        if (normalizedPhone.length < 10) return res.status(400).json({ error: 'Informe um telefone válido' });
         const scope = companyScope(req);
-        if (customerId) {
-            const customer = await prisma.customer.findFirst({ where: { id: customerId, ...scope }, select: { id: true } });
+        let resolvedCustomerId = customerId || null;
+        const resolvedBusinessId = typeof businessId === 'string' && businessId.trim() ? businessId.trim() : null;
+
+        if (resolvedBusinessId) {
+            const business = await prisma.customerBusiness.findFirst({
+                where: { id: resolvedBusinessId, ...scope },
+                select: { id: true, customerId: true },
+            });
+            if (!business) return res.status(404).json({ error: 'Empresa/CNPJ n\u00e3o encontrado nesta empresa' });
+            if (resolvedCustomerId && resolvedCustomerId !== business.customerId) {
+                return res.status(400).json({ error: 'A empresa/CNPJ selecionada n\u00e3o pertence ao cliente informado' });
+            }
+            resolvedCustomerId = business.customerId;
+        }
+
+        if (resolvedCustomerId) {
+            const customer = await prisma.customer.findFirst({ where: { id: resolvedCustomerId, ...scope }, select: { id: true } });
             if (!customer) return res.status(404).json({ error: 'Customer not found' });
         }
-        const existing = await prisma.contact.findFirst({ where: { phone, ...scope }, select: { id: true } });
+        const existing = await prisma.contact.findFirst({
+            where: { phone: { in: phoneAliases(normalizedPhone) }, ...scope },
+            select: { id: true },
+        });
         if (existing) return res.status(409).json({ error: 'Telefone já cadastrado nesta empresa' });
         const contact = await prisma.contact.create({
-            data: { ...scope, name, phone, email, role, notes, customerId: customerId ?? undefined },
+            data: {
+                ...scope,
+                name,
+                phone: normalizedPhone,
+                email,
+                role,
+                notes,
+                customerId: resolvedCustomerId,
+                businessId: resolvedBusinessId,
+                ...(typeof welcomeMessageEnabled === 'boolean' ? { welcomeMessageEnabled } : {}),
+                ...(typeof includeInServiceReports === 'boolean' ? { includeInServiceReports } : {}),
+            },
+            include: contactCompanyInclude,
         });
         res.status(201).json(contact);
     } catch (error: any) {
@@ -76,18 +141,61 @@ router.post('/', async (req, res) => {
 // Update
 router.patch('/:id', async (req, res) => {
     try {
-        const { name, email, notes, role, customerId } = req.body ?? {};
+        const { name, email, notes, role, customerId, businessId, welcomeMessageEnabled, includeInServiceReports } = req.body ?? {};
         const scope = companyScope(req);
-        if (customerId) {
-            const customer = await prisma.customer.findFirst({ where: { id: customerId, ...scope }, select: { id: true } });
-            if (!customer) return res.status(404).json({ error: 'Customer not found' });
-        }
-        const result = await prisma.contact.updateMany({
+        const existing = await prisma.contact.findFirst({
             where: { id: req.params.id, ...scope },
-            data: { name, email, notes, role, customerId },
+            select: { id: true, customerId: true, businessId: true },
         });
-        if (result.count === 0) return res.status(404).json({ error: 'Contact not found' });
-        const contact = await prisma.contact.findFirst({ where: { id: req.params.id, ...scope } });
+        if (!existing) return res.status(404).json({ error: 'Contact not found' });
+
+        const hasCustomerId = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'customerId');
+        const hasBusinessId = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'businessId');
+        let resolvedCustomerId = hasCustomerId ? (customerId || null) : existing.customerId;
+        let resolvedBusinessId = hasBusinessId
+            ? (typeof businessId === 'string' && businessId.trim() ? businessId.trim() : null)
+            : existing.businessId;
+
+        if (hasCustomerId && !hasBusinessId && resolvedCustomerId !== existing.customerId) {
+            resolvedBusinessId = null;
+        }
+
+        if (resolvedBusinessId) {
+            const business = await prisma.customerBusiness.findFirst({
+                where: { id: resolvedBusinessId, ...scope },
+                select: { id: true, customerId: true },
+            });
+            if (!business) return res.status(404).json({ error: 'Empresa/CNPJ n\u00e3o encontrado nesta empresa' });
+            if (resolvedCustomerId && resolvedCustomerId !== business.customerId) {
+                return res.status(400).json({ error: 'A empresa/CNPJ selecionada n\u00e3o pertence ao cliente informado' });
+            }
+            resolvedCustomerId = business.customerId;
+        }
+
+        if (resolvedCustomerId) {
+            const customer = await prisma.customer.findFirst({
+                where: { id: resolvedCustomerId, ...scope },
+                select: { id: true },
+            });
+            if (!customer) return res.status(404).json({ error: 'Customer not found' });
+        } else {
+            resolvedBusinessId = null;
+        }
+
+        const contact = await prisma.contact.update({
+            where: { id: existing.id },
+            data: {
+                name,
+                email,
+                notes,
+                role,
+                customerId: resolvedCustomerId,
+                businessId: resolvedBusinessId,
+                ...(typeof welcomeMessageEnabled === 'boolean' ? { welcomeMessageEnabled } : {}),
+                ...(typeof includeInServiceReports === 'boolean' ? { includeInServiceReports } : {}),
+            },
+            include: contactCompanyInclude,
+        });
         res.json(contact);
     } catch (error: any) {
         res.status(error?.status ?? 500).json({ error: error?.message ?? 'Failed to update contact' });
@@ -107,7 +215,7 @@ router.delete('/:id/data', async (req, res) => {
         });
 
         if (!contact) return res.status(404).json({ error: 'Contact not found' });
-        const normalizedPhone = contact.phone.replace(/\D/g, '');
+        const acceptedPhoneVariants = phoneAliases(contact.phone);
 
         const conversationIds = (await prisma.conversation.findMany({
             where: { contactId: contact.id, ...companyScope(req) },
@@ -135,10 +243,10 @@ router.delete('/:id/data', async (req, res) => {
                 : { count: 0 };
             const conversations = await tx.conversation.deleteMany({ where: { contactId: contact.id, ...companyScope(req) } });
             const inboundEvents = await tx.whatsAppInboundEvent.deleteMany({
-                where: { companyId: contact.companyId, fromPhone: { in: [contact.phone, normalizedPhone] } },
+                where: { companyId: contact.companyId, fromPhone: { in: acceptedPhoneVariants } },
             });
             const outbox = await tx.whatsAppOutbox.deleteMany({
-                where: { companyId: contact.companyId, toPhone: normalizedPhone },
+                where: { companyId: contact.companyId, toPhone: { in: acceptedPhoneVariants } },
             });
             const contacts = await tx.contact.deleteMany({ where: { id: contact.id, ...companyScope(req) } });
 

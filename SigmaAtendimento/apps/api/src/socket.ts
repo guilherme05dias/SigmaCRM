@@ -3,14 +3,19 @@ import { Server as HttpServer } from 'http';
 import jwt from 'jsonwebtoken';
 import type { AuthPayload } from './middlewares/auth.middleware';
 import { prisma } from './lib/prisma';
+import { env, isOriginAllowed } from './config/env';
 
 let io: Server;
-const JWT_SECRET = process.env.JWT_SECRET || 'sigma-secret-dev-key';
 
 export const initSocket = (httpServer: HttpServer) => {
     io = new Server(httpServer, {
         cors: {
-            origin: '*',
+            origin: (origin, callback) => {
+                if (isOriginAllowed(origin)) {
+                    return callback(null, true);
+                }
+                return callback(new Error(`Origem nao permitida pelo Socket.io: ${origin}`));
+            },
             methods: ['GET', 'POST']
         }
     });
@@ -26,7 +31,7 @@ export const initSocket = (httpServer: HttpServer) => {
         let payload: AuthPayload;
 
         try {
-            payload = jwt.verify(token, JWT_SECRET) as AuthPayload;
+            payload = jwt.verify(token, env.jwtSecret) as AuthPayload;
         } catch {
             console.log('Socket disconnected: Invalid token');
             socket.disconnect(true);
@@ -44,6 +49,7 @@ export const initSocket = (httpServer: HttpServer) => {
         }
 
         console.log(`Socket connected: User ${payload.id} (${socket.id})`);
+        socket.join(`user:${payload.id}`);
 
         socket.on('conversation:join', async ({ conversationId }) => {
             if (!conversationId || !socket.data.companyId) return;
@@ -96,4 +102,16 @@ export const emitToCompany = (
         return;
     }
     getIO().to(`company:${companyId}`).emit(event, payload);
+};
+
+export const emitToUser = (
+    userId: string | null | undefined,
+    event: string,
+    payload: unknown
+) => {
+    if (!userId) {
+        console.warn(`[socket] emitToUser sem userId — evento "${event}" não emitido`);
+        return;
+    }
+    getIO().to(`user:${userId}`).emit(event, payload);
 };

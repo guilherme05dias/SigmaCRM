@@ -9,6 +9,7 @@
 **/.env.local
 **/.env.*.local
 !**/.env.example
+.local-certs/
 
 # Agent tooling / skills — NÃO fazem parte do produto
 .agent/

@@ -1,77 +1,47 @@
-# Project Reorganization Plan
+# Organização atual do projeto
 
-This plan outlines the reorganization of the SigmaCRM project to separate frontend and backend layers, centralize database schemas, and clean up the root workspace structure.
+Atualizado em: 2026-07-09
 
-## Overview
+Este arquivo substitui o plano antigo de reorganização. A estrutura principal já foi consolidada em um monorepo npm chamado `SigmaAtendimento/`.
 
-The current workspace contains two separate application roots (`crm-tecnicos-app` and `servicocrm-web`). To improve developer experience and conform to modern project layouts, we are organizing the workspace as a polyglot monorepo with distinct layers:
-1. `frontend/` containing user interface components (Web & Streamlit clients).
-2. `backend/` containing API components and server services (WhatsApp Bridge).
-3. `database/` containing PostgreSQL and SQLite schemas/migration scripts.
-4. `docs/` containing overall system and project documentation.
+## Decisão atual
 
-## Proposed Changes
+O app ativo é:
 
-### [Workspace Restructuring]
+```text
+SigmaAtendimento/
+```
 
-#### [NEW] [frontend/](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/frontend)
-#### [NEW] [backend/](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/backend)
-#### [NEW] [database/](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/database)
-#### [NEW] [docs/](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/docs)
+As pastas `frontend/`, `backend/` e `database/` são legado/histórico e não devem ser usadas como base para novas funcionalidades.
 
----
+## Estrutura recomendada
 
-### [Frontend Component]
+```text
+SigmaCRM/
+├─ SigmaAtendimento/      Produto ativo
+│  ├─ apps/api/           API Express, Prisma, Postgres/Supabase, Socket.io
+│  ├─ apps/web/           React, Vite, Tailwind
+│  ├─ apps/whatsapp-api/  Serviço local opcional de WhatsApp Web
+│  └─ packages/shared/    Contratos/tipos compartilhados
+├─ docs/                  Requisitos, roadmap, arquitetura e guias
+├─ frontend/              Legado
+├─ backend/               Legado
+└─ database/              Legado
+```
 
-- Move Next.js application to `frontend/web/`
-- Move Streamlit application to `frontend/streamlit/`
+## Regra de manutenção
 
-#### [MODIFY] [web](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/frontend/web) (moved from `servicocrm-web`)
-#### [MODIFY] [streamlit](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/frontend/streamlit) (moved from `crm-tecnicos-app`)
+- Implementações novas entram em `SigmaAtendimento/`.
+- Documentação de produto entra em `docs/`.
+- Documentação técnica específica do monorepo pode entrar em `SigmaAtendimento/docs/`.
+- Pastas legadas devem ser preservadas por enquanto, mas não expandidas.
 
----
+## Próximas frentes de organização
 
-### [Backend Component]
-
-- Move Node.js WhatsApp bridge to `backend/whatsapp-bridge/`
-
-#### [MODIFY] [whatsapp-bridge](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/backend/whatsapp-bridge) (moved from `crm-tecnicos-app/whatsapp_bridge`)
-
----
-
-### [Database & Migrations Component]
-
-- Centralize database migrations, SQLite seeds, and raw data files into the root `database/` directory.
-
-#### [NEW] [supabase_schema.sql](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/database/supabase/supabase_schema.sql) (moved from `crm-tecnicos-app/supabase_schema.sql`)
-#### [MODIFY] [migrate_to_supabase.py](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/frontend/streamlit/migrate_to_supabase.py) (kept with the Streamlit app and updated to read schemas from `database/supabase/`)
-#### [NEW] [crm_dados.xlsx](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/database/data/crm_dados.xlsx) (moved from `crm-tecnicos-app/crm_dados.xlsx`)
-
----
-
-### [Documentation Component]
-
-- Move PRD, Roadmap, Design system definitions, and Setup instructions to a dedicated `docs/` folder to clean up the application roots.
-
-#### [NEW] [PRD.md](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/docs/PRD.md)
-#### [NEW] [ROADMAP.md](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/docs/ROADMAP.md)
-#### [NEW] [DESIGN_SYSTEM.md](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/docs/DESIGN_SYSTEM.md)
-#### [NEW] [DESIGN-meta.md](file:///c:/Users/Guilherme%20Dias/Desktop/SigmaCRM/docs/DESIGN-meta.md)
-
----
-
-## Verification Plan
-
-### Automated Tests
-- Run `python .agent/scripts/checklist.py .` to ensure lint and structure checks pass.
-- Run `npm run lint` or local TypeScript check inside `frontend/web/`.
-
-### Manual Verification
-- Verify running the Streamlit app using the updated `frontend/streamlit/run_app.bat`.
-- Verify the Node.js bridge builds and runs from `backend/whatsapp-bridge/`.
-
-## ✅ PHASE X COMPLETE
-- Lint: ✅ Pass
-- Security: ✅ No critical issues
-- Build: ✅ Success
-- Date: 2026-06-03
+1. Completar RBAC por perfil.
+2. Remover alteração de schema em runtime e migrar para migration Prisma.
+3. Padronizar roles do requisito: administrador, supervisor, atendente e técnico.
+4. Tornar `companyId` obrigatório nas tabelas operacionais.
+5. Criar cadastros centrais de setores e sistemas/assuntos.
+6. Implementar fila WhatsApp por setor.
+7. Implementar visitas técnicas com painel próprio.

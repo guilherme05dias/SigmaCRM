@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import path from 'node:path';
 import authRoutes from './routes/auth.routes';
 import usersRoutes from './routes/users.routes';
 import departmentsRoutes from './routes/departments.routes';
@@ -12,22 +12,18 @@ import ticketsRoutes from './routes/tickets.routes';
 import inboxRoutes from './routes/inbox.routes';
 import reportsRoutes from './routes/reports.routes';
 import settingsRoutes from './routes/settings.routes';
+import serviceTopicsRoutes from './routes/serviceTopics.routes';
+import notificationsRoutes from './routes/notifications.routes';
 import { createServer } from 'http';
 import { initSocket } from './socket';
-import { ensureRuntimeSchema } from './lib/ensureSchema';
-
-dotenv.config();
+import { env, isOriginAllowed } from './config/env';
+import { startConversationFallbackWorker } from './services/conversationFallback.service';
 
 const app = express();
 
-const allowedOrigins = (process.env.CORS_ORIGIN || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        if (isOriginAllowed(origin)) {
             return callback(null, true);
         }
         return callback(new Error(`Origem não permitida pelo CORS: ${origin}`));
@@ -50,6 +46,8 @@ app.use('/api/tickets', ticketsRoutes);
 app.use('/api/inbox', inboxRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/service-topics', serviceTopicsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 
 app.get('/', (_req, res) => {
     res.json({
@@ -65,6 +63,8 @@ app.get('/', (_req, res) => {
             '/api/inbox',
             '/api/reports/summary',
             '/api/settings',
+            '/api/service-topics',
+            '/api/notifications',
             '/api/whatsapp/sessions',
         ],
     });
@@ -74,17 +74,17 @@ app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date() });
 });
 
-const PORT = process.env.PORT || 3333;
+app.get('/sigma-local-ca.crt', (_req, res) => {
+    res.download(
+        path.resolve(process.cwd(), '.local-certs', 'sigma-local-ca.crt'),
+        'sigma-local-ca.crt',
+    );
+});
 
 const httpServer = createServer(app);
 initSocket(httpServer);
+startConversationFallbackWorker();
 
-ensureRuntimeSchema()
-    .catch((error) => {
-        console.error('Failed to ensure runtime schema:', error);
-    })
-    .finally(() => {
-        httpServer.listen(PORT, () => {
-            console.log(`Server API is running on http://localhost:${PORT}`);
-        });
-    });
+httpServer.listen(env.port, () => {
+    console.log(`Server API is running on http://localhost:${env.port}`);
+});

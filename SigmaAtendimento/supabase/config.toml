@@ -1,0 +1,13 @@
+project_id = "fiayxnorzxvrxambetds"
+
+[functions.uazapi-webhook]
+verify_jwt = false
+
+[functions.uazapi-send-message]
+verify_jwt = false
+
+[functions.uazapi-history]
+verify_jwt = false
+
+[functions.uazapi-download-media]
+verify_jwt = false

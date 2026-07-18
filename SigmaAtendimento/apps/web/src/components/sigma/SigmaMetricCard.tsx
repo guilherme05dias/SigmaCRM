@@ -10,26 +10,26 @@ interface SigmaMetricCardProps {
 
 const toneClass: Record<NonNullable<SigmaMetricCardProps['colorClass']>, string> = {
     primary: 'bg-primary/10 text-primary',
-    secondary: 'bg-sky-500/10 text-sky-600',
-    'amber-500': 'bg-amber-500/10 text-amber-600',
-    'emerald-500': 'bg-emerald-500/10 text-emerald-600',
+    secondary: 'bg-accent-soft text-accent',
+    'amber-500': 'bg-warning-soft text-warning-fg',
+    'emerald-500': 'bg-success-soft text-success-fg',
     'red-500': 'bg-danger-soft text-danger',
-    'violet-500': 'bg-violet-500/10 text-violet-600',
+    'violet-500': 'bg-accent-soft text-accent',
     'slate-500': 'bg-surface-alt text-muted-foreground',
 };
 
 export function SigmaMetricCard({ title, value, icon, colorClass = 'primary' }: SigmaMetricCardProps) {
     return (
-        <div className="bg-surface p-6 rounded-2xl border border-border shadow-card">
-            <div className="flex items-center gap-4">
-                <div className={`size-12 rounded-2xl flex items-center justify-center ${toneClass[colorClass]}`}>
-                    <Icon name={icon} className="size-6" />
+        <div className="rounded-xl border border-border bg-surface px-5 py-4">
+            <div className="flex items-center gap-3">
+                <div className={`flex size-10 items-center justify-center rounded-lg ${toneClass[colorClass]}`}>
+                    <Icon name={icon} className="size-5" />
                 </div>
-                <div>
-                    <p className="text-muted-foreground text-xs font-bold uppercase tracking-wider">
+                <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-muted-foreground">
                         {title}
                     </p>
-                    <h3 className="text-2xl font-black text-foreground">{value}</h3>
+                    <p className="mt-0.5 text-2xl font-bold tracking-tight text-foreground">{value}</p>
                 </div>
             </div>
         </div>

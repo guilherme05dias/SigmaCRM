@@ -7,6 +7,7 @@ import { Icon } from '../components/ui/Icon';
 import { Skeleton } from '../components/ui/Skeleton';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { contactDisplayName } from '../components/inbox/contactDisplayName';
 
 interface MetricsData {
     range: string;
@@ -19,25 +20,45 @@ interface MetricsData {
         totalTicketsResolved: number;
         conversationsByDepartment: { department: string; count: number }[];
         ticketsByTechnician: { technician: string; count: number }[];
+        csat: { average: number | null; count: number };
+        attendantRatings: {
+            userId: string;
+            userName: string;
+            average: number;
+            count: number;
+        }[];
     };
+}
+
+interface ConversationReportRecord {
+    id: string;
+    customerName: string;
+    businessName: string | null;
+    businessCnpj: string | null;
+    systemName: string;
+    summary: string;
+    rating: number | null;
+    observation: string | null;
+    closedAt: string;
+}
+
+function formatRating(value: number | null) {
+    if (value === null) return '—';
+    return value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function formatCnpj(value: string | null) {
+    if (!value) return null;
+    return value.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
 export default function Reports() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
-    const [range, setRange] = useState('7d');
     const [data, setData] = useState<MetricsData | null>(null);
+    const [records, setRecords] = useState<ConversationReportRecord[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-
-    const ranges = [
-        { value: '1d', label: 'Hoje' },
-        { value: '7d', label: '7 Dias' },
-        { value: '15d', label: '15 Dias' },
-        { value: '30d', label: '30 Dias' },
-        { value: '60d', label: '60 Dias' },
-        { value: '90d', label: '90 Dias' },
-    ];
 
     const hasOperationalData = data
         ? data.metrics.totalConversationsOpened > 0
@@ -46,50 +67,50 @@ export default function Reports() {
             || data.metrics.totalTicketsResolved > 0
             || data.metrics.conversationsByDepartment.length > 0
             || data.metrics.ticketsByTechnician.length > 0
+            || data.metrics.attendantRatings.length > 0
+            || records.length > 0
         : false;
 
     useEffect(() => {
         setLoading(true);
         setError(null);
-        apiRequest<MetricsData>(`/api/reports/summary?range=${range}`)
-            .then(resData => {
+        Promise.all([
+            apiRequest<MetricsData>('/api/reports/summary'),
+            apiRequest<{ records: ConversationReportRecord[] }>('/api/reports/records'),
+        ])
+            .then(([resData, recordsData]) => {
                 setData(resData);
+                setRecords(recordsData.records);
             })
             .catch(err => {
                 if (!redirectOnUnauthorized(err, navigate)) {
                     setError(err instanceof Error ? err.message : 'Erro ao carregar relatórios.');
                     setData(null);
+                    setRecords([]);
                 }
             })
             .finally(() => setLoading(false));
-    }, [range, navigate]);
+    }, [navigate]);
 
     return (
         <div className="flex flex-col min-h-screen bg-background text-foreground font-sans">
             <SigmaTopbar user={user} onLogout={logout} />
 
-            <main className="flex-1 max-w-[1440px] mx-auto w-full p-6 lg:p-10">
+            <main className="mx-auto w-full max-w-[1440px] flex-1 p-4 pb-24 sm:p-6 sm:pb-24 md:pb-6 lg:p-10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-3xl font-extrabold tracking-tight text-foreground font-display">Relatórios</h1>
                         <p className="text-muted-foreground mt-1">Acompanhe os principais indicadores de desempenho do seu time.</p>
                     </div>
 
-                    <div className="flex bg-surface border border-border rounded-xl p-1 shadow-card">
-                        {ranges.map(r => (
-                            <button
-                                type="button"
-                                key={r.value}
-                                onClick={() => setRange(r.value)}
-                                aria-pressed={range === r.value}
-                                className={`px-4 py-1.5 text-sm rounded-lg transition-all font-medium cursor-pointer ${range === r.value
-                                        ? 'bg-primary text-white shadow-sm'
-                                        : 'text-muted-foreground hover:text-foreground hover:bg-surface-alt'
-                                    }`}
-                            >
-                                {r.label}
-                            </button>
-                        ))}
+                    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <Icon name="schedule" className="size-5" />
+                        </div>
+                        <div>
+                            <p className="text-xs text-muted-foreground">Período do relatório</p>
+                            <p className="text-sm font-semibold text-foreground">Desde 14/07/2026 às 08:00</p>
+                        </div>
                     </div>
                 </div>
 
@@ -110,8 +131,8 @@ export default function Reports() {
                 ) : !hasOperationalData ? (
                     <EmptyState
                         icon="dashboard"
-                        title="Sem dados no período"
-                        description="Ainda não há conversas, mensagens ou chamados para o intervalo selecionado."
+                        title="Sem dados desde o início"
+                        description="Ainda não há conversas, mensagens ou chamados registrados desde 14/07/2026 às 08:00."
                     />
                 ) : (
                     <div className="flex flex-col gap-8">
@@ -123,6 +144,97 @@ export default function Reports() {
                             <SigmaMetricCard title="Chamados Abertos" value={data.metrics.totalTicketsOpened} icon="build" colorClass="amber-500" />
                             <SigmaMetricCard title="Chamados Resolvidos" value={data.metrics.totalTicketsResolved} icon="check_circle" colorClass="secondary" />
                         </div>
+
+                        <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-card">
+                            <div className="border-b border-border px-5 py-4 sm:px-6">
+                                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground font-display">
+                                    <Icon name="bar_chart" className="size-5 text-primary" />
+                                    Relatórios de atendimento
+                                </h2>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Registros mínimos preservados após a remoção das conversas.
+                                </p>
+                            </div>
+
+                            {records.length === 0 ? (
+                                <div className="p-6">
+                                    <EmptyState
+                                        icon="bar_chart"
+                                        title="Nenhum relatório finalizado"
+                                        description="Os registros aparecerão aqui depois que um atendimento for encerrado."
+                                    />
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="divide-y divide-border md:hidden">
+                                        {records.map((record) => (
+                                            <article key={record.id} className="space-y-3 px-5 py-4">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <h3 className="truncate text-sm font-semibold text-foreground">
+                                                            {contactDisplayName({ name: record.customerName }, record.businessName)}
+                                                        </h3>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {record.businessName || 'Sem empresa'}
+                                                            {record.businessCnpj ? ` · ${formatCnpj(record.businessCnpj)}` : ''}
+                                                        </p>
+                                                    </div>
+                                                    <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                                                        {record.rating === null ? 'Sem nota' : `${record.rating}/10`}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{record.systemName}</p>
+                                                    <p className="mt-1 text-sm text-foreground">{record.summary}</p>
+                                                </div>
+                                                {record.observation && <p className="text-sm text-muted-foreground">Obs.: {record.observation}</p>}
+                                                <time className="block text-xs text-muted-foreground" dateTime={record.closedAt}>
+                                                    {new Date(record.closedAt).toLocaleString('pt-BR')}
+                                                </time>
+                                            </article>
+                                        ))}
+                                    </div>
+
+                                    <div className="hidden overflow-x-auto md:block">
+                                        <table className="w-full min-w-[980px] text-left text-sm">
+                                            <thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground">
+                                                <tr>
+                                                    <th className="px-5 py-3 font-semibold">Nome</th>
+                                                    <th className="px-5 py-3 font-semibold">Empresa / CNPJ</th>
+                                                    <th className="px-5 py-3 font-semibold">Sistema</th>
+                                                    <th className="px-5 py-3 font-semibold">Relatório</th>
+                                                    <th className="px-5 py-3 font-semibold">Avaliação</th>
+                                                    <th className="px-5 py-3 font-semibold">Observação</th>
+                                                    <th className="px-5 py-3 font-semibold">Encerrado em</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border">
+                                                {records.map((record) => (
+                                                    <tr key={record.id} className="align-top transition-colors hover:bg-surface-alt/60">
+                                                        <td className="px-5 py-4 font-semibold text-foreground">
+                                                            {contactDisplayName({ name: record.customerName }, record.businessName)}
+                                                        </td>
+                                                        <td className="px-5 py-4 text-muted-foreground">
+                                                            <span className="block text-foreground">{record.businessName || 'Sem empresa'}</span>
+                                                            {record.businessCnpj && <span className="text-xs">{formatCnpj(record.businessCnpj)}</span>}
+                                                        </td>
+                                                        <td className="px-5 py-4 text-foreground">{record.systemName}</td>
+                                                        <td className="max-w-xs px-5 py-4 text-foreground">{record.summary}</td>
+                                                        <td className="px-5 py-4 font-mono font-bold text-foreground">
+                                                            {record.rating === null ? '—' : `${record.rating}/10`}
+                                                        </td>
+                                                        <td className="max-w-xs px-5 py-4 text-muted-foreground">{record.observation || '—'}</td>
+                                                        <td className="whitespace-nowrap px-5 py-4 text-muted-foreground">
+                                                            {new Date(record.closedAt).toLocaleString('pt-BR')}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </>
+                            )}
+                        </section>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                             {/* Breakdown by Department */}
@@ -180,6 +292,69 @@ export default function Reports() {
                                 )}
                             </div>
                         </div>
+
+                        <section className="overflow-hidden rounded-2xl border border-border bg-surface">
+                            <div className="flex flex-col gap-3 border-b border-border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                    <h3 className="flex items-center gap-2 text-lg font-bold text-foreground font-display">
+                                        <Icon name="sentiment_satisfied" className="size-5 text-primary" />
+                                        Avaliação por atendente
+                                    </h3>
+                                    <p className="mt-1 text-sm text-muted-foreground">Média das notas de 1 a 10 recebidas após o encerramento no WhatsApp.</p>
+                                </div>
+                                {data.metrics.csat.count > 0 && (
+                                    <div className="shrink-0 rounded-lg bg-surface-alt px-3 py-2 text-right">
+                                        <p className="text-xs text-muted-foreground">Média geral</p>
+                                        <p className="font-mono text-lg font-bold text-foreground">
+                                            {formatRating(data.metrics.csat.average)}<span className="text-sm font-medium text-muted-foreground">/10</span>
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {data.metrics.attendantRatings.length > 0 ? (
+                                <div className="divide-y divide-border">
+                                    {data.metrics.attendantRatings.map((item) => (
+                                        <div key={item.userId} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center">
+                                            <div className="flex min-w-0 flex-1 items-center gap-3">
+                                                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
+                                                    {item.userName.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-sm font-semibold text-foreground">{item.userName}</p>
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {item.count} {item.count === 1 ? 'avaliação' : 'avaliações'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="flex w-full items-center gap-3 sm:w-72">
+                                                <div
+                                                    className="h-2 flex-1 overflow-hidden rounded-full bg-surface-alt"
+                                                    role="progressbar"
+                                                    aria-label={`Média de ${item.userName}`}
+                                                    aria-valuemin={0}
+                                                    aria-valuemax={10}
+                                                    aria-valuenow={Number(item.average.toFixed(1))}
+                                                >
+                                                    <div className="h-full rounded-full bg-primary-solid" style={{ width: `${Math.max(0, Math.min(item.average * 10, 100))}%` }} />
+                                                </div>
+                                                <p className="w-16 text-right font-mono text-base font-bold text-foreground">
+                                                    {formatRating(item.average)}<span className="text-xs font-medium text-muted-foreground">/10</span>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="p-6">
+                                    <EmptyState
+                                        icon="sentiment_satisfied"
+                                        title="Sem avaliações no período"
+                                        description="As médias aparecerão quando os clientes responderem à pesquisa enviada após o atendimento."
+                                    />
+                                </div>
+                            )}
+                        </section>
 
                     </div>
                 )}

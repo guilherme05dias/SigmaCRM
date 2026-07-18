@@ -436,7 +436,7 @@ export default function TermsOfService() {
             <header className="border-b border-border bg-surface">
                 <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 md:px-8">
                     <Link to="/" className="flex items-center gap-2 text-foreground hover:opacity-80 transition-opacity">
-                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-sm font-bold text-white">Σ</span>
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-solid text-sm font-bold text-primary-solid-fg">Σ</span>
                         <span className="font-bold">Sigma Atendimento</span>
                     </Link>
                     <nav className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -448,7 +448,7 @@ export default function TermsOfService() {
                         </Link>
                         <Link
                             to="/login"
-                            className="rounded-lg bg-primary px-4 py-1.5 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
+                            className="inline-flex min-h-11 items-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover"
                         >
                             Entrar
                         </Link>
@@ -551,7 +551,7 @@ export default function TermsOfService() {
                                 </Link>
                                 <Link
                                     to="/login"
-                                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 transition-colors"
+                                    className="inline-flex min-h-11 items-center rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover"
                                 >
                                     Voltar ao Login
                                 </Link>

@@ -1,247 +1,242 @@
-# PRD — ServiçoCRM (SigmaCRM)
+# PRD — Sigma Atendimento + CRM
 
-**Documento de Requisitos de Produto**
-**Versão:** 1.0
-**Data:** 2026-06-01
-**Status:** Em produção (MVP entregue, evoluindo)
+**Versão:** 2.0  
+**Data:** 2026-07-09  
+**Status:** Requisitos de produto validados para a próxima evolução
 
----
+## 1. Visão do produto
 
-## 1. Visão Geral
+O Sigma Atendimento + CRM centraliza o relacionamento com clientes desde o primeiro contato pelo WhatsApp até a eventual execução de uma visita técnica.
 
-### 1.1 Resumo
-ServiçoCRM é um sistema de gestão de atendimentos técnicos voltado para
-pequenas e médias operações de suporte (assistências técnicas, prestadores de
-TI, equipes de campo). Centraliza o ciclo de vida do atendimento — do primeiro
-contato à resolução — junto ao cadastro de clientes, equipe técnica e
-integração nativa com WhatsApp.
+O fluxo principal é:
 
-### 1.2 Problema
-Operações de suporte técnico de pequeno porte tipicamente controlam
-atendimentos por planilhas, cadernos ou conversas soltas de WhatsApp. Isso gera:
-- Perda de histórico e dificuldade de rastrear status de cada chamado.
-- Falta de padronização (protocolo, prioridade, SLA informal).
-- Ausência de visão gerencial (volume, produtividade por técnico, pendências).
-- Conversas de WhatsApp desconectadas do registro formal do atendimento.
+1. cliente envia uma mensagem;
+2. o sistema identifica ou cria o contato pelo telefone;
+3. um registro de atendimento é criado automaticamente;
+4. o cliente escolhe um setor por menu numérico;
+5. o atendimento entra na fila do setor;
+6. um atendente ou técnico assume a conversa;
+7. o atendimento é resolvido remotamente ou gera um chamado para visita;
+8. todo o histórico permanece vinculado ao cliente no CRM.
 
-### 1.3 Proposta de Valor
-Um CRM leve, em português, com:
-- Registro padronizado de atendimentos com **protocolo automático**.
-- **Dashboard** gerencial com métricas em tempo real.
-- **Integração com WhatsApp** que captura conversas e as vincula a atendimentos.
-- Controle de acesso por perfil (gerente, atendente, técnico).
-- Baixíssimo custo de operação (Streamlit + Supabase free tier).
+Inicialmente, o sistema atenderá uma única empresa e um único número de WhatsApp. A estrutura multiempresa existente será preservada para evolução futura.
 
-### 1.4 Objetivos de Negócio
-| Objetivo | Métrica de sucesso |
-|----------|--------------------|
-| Centralizar atendimentos | 100% dos chamados registrados no sistema |
-| Reduzir perda de histórico | Histórico completo por cliente e protocolo |
-| Dar visão gerencial | Dashboard consultado diariamente pela gestão |
-| Integrar WhatsApp ao fluxo | Conversas vinculadas a atendimentos |
+## 2. Perfis
 
----
+### Administrador
 
-## 2. Público-Alvo e Personas
+- acesso completo;
+- gerencia usuários, setores, sistemas/assuntos e configurações;
+- visualiza indicadores de toda a equipe;
+- define o técnico padrão da empresa.
 
-### 2.1 Persona — Gerente / Dono da operação
-- **Necessidades:** visão geral, produtividade da equipe, gestão de usuários,
-  acesso total ao sistema.
-- **Dores:** não sabe quantos chamados estão abertos nem quem está sobrecarregado.
+### Supervisor
 
-### 2.2 Persona — Atendente / Recepção
-- **Necessidades:** registrar novos chamados rápido, cadastrar clientes,
-  acompanhar fila de atendimentos.
-- **Dores:** retrabalho ao recadastrar o mesmo cliente, falta de protocolo.
+- acompanha todas as filas, atendimentos e visitas;
+- transfere atendimentos;
+- visualiza indicadores gerais;
+- acompanha produtividade e histórico.
 
-### 2.3 Persona — Técnico de campo/remoto
-- **Necessidades:** ver seus chamados, atualizar status e registrar resolução.
-- **Dores:** não tem onde anotar o que foi feito de forma rastreável.
+### Atendente
 
----
+- visualiza filas permitidas;
+- assume e conduz vários atendimentos simultâneos;
+- cadastra e complementa clientes;
+- encerra atendimentos;
+- abre e agenda visitas técnicas.
 
-## 3. Escopo
+### Técnico
 
-### 3.1 Dentro do escopo (MVP atual)
-- Cadastro e gestão de **técnicos**, **clientes** e **atendimentos**.
-- **Protocolo automático** por dia (`ATD<AAAAMMDD>-<sequência>`).
-- **Dashboard** com métricas e atalhos.
-- **Resumo diário** por data.
-- **Exportação CSV**.
-- **Autenticação** por usuário/senha e **RBAC** por perfil.
-- **Gestão de usuários** (criação, edição, permissões granulares).
-- **Integração WhatsApp** (captura de mensagens, conversas, vínculo a atendimento).
-- **Health check** operacional na sidebar.
+- pode assumir atendimentos do WhatsApp;
+- recebe e executa visitas;
+- altera agendamentos mediante justificativa;
+- registra o resultado da visita;
+- visualiza os próprios indicadores.
 
-### 3.2 Fora do escopo (por enquanto)
-- App mobile nativo (acesso é via navegador/rede local ou Tailscale).
-- Faturamento/financeiro e emissão de notas.
-- Assinatura/SLA contratual automatizado com alertas.
-- Multi-tenant (uma instância = uma operação).
-- Envio ativo de mensagens pelo WhatsApp a partir do CRM (atualmente captura/leitura).
+## 3. Atendimento pelo WhatsApp
 
----
+### 3.1 Entrada e identificação
 
-## 4. Requisitos Funcionais
+- Cada nova conversa após um atendimento encerrado cria um novo atendimento.
+- O contato é criado automaticamente pelo número de telefone.
+- Uma empresa cliente pode possuir vários contatos.
+- O cliente poderá continuar enviando detalhes enquanto aguarda na fila.
+- Todas as mensagens devem permanecer registradas.
 
-### 4.1 Autenticação e Controle de Acesso
-- **RF-01** O sistema deve exigir login (usuário + senha) para qualquer acesso.
-- **RF-02** Senhas devem ser armazenadas com hash seguro (PBKDF2-HMAC-SHA256).
-- **RF-03** O acesso a páginas e ações deve respeitar o perfil do usuário (RBAC).
-- **RF-04** Perfis padrão:
-  - `gerente`: acesso total.
-  - `atendente`: Dashboard, Atendimentos, Resumo, Clientes.
-  - `tecnico`: Dashboard, Atendimentos, Resumo.
-- **RF-05** O gerente pode sobrescrever permissões por usuário (páginas e ações).
-- **RF-06** O gerente pode criar usuários, ativar/inativar e redefinir senhas.
+### 3.2 Triagem
 
-### 4.2 Técnicos
-- **RF-07** Cadastrar técnico (nome, especialidade, telefone, e-mail, ativo).
-- **RF-08** Editar e ativar/inativar técnico.
-- **RF-09** Excluir técnico (com proteção de integridade referencial).
+- A triagem inicial usa menu numérico.
+- O cliente escolhe um setor.
+- Após a escolha, o sistema informa que a equipe está finalizando outros atendimentos e assumirá assim que possível.
+- Se não houver escolha em até 2 minutos, o atendimento é direcionado para um técnico padrão da empresa.
+- O técnico padrão é configurado pelo administrador.
 
-### 4.3 Clientes
-- **RF-10** Cadastrar cliente (nome, empresa, telefone, e-mail, cidade,
-  segmento, observações, status).
-- **RF-11** "Obter ou criar" cliente por nome para evitar duplicidade no registro rápido.
-- **RF-12** Editar perfil e alterar status (Ativo / Em negociação / Inativo).
-- **RF-13** Listagem priorizando clientes ativos.
+### 3.3 Fila e atribuição
 
-### 4.4 Atendimentos
-- **RF-14** Registrar atendimento com protocolo automático único por dia.
-- **RF-15** Campos: título, descrição, técnico, cliente, status, prioridade,
-  canal, tipo de serviço, prazo, equipamento, categoria, próxima ação, resolução,
-  tempo gasto, avaliação do cliente (1–5).
-- **RF-16** Atualizar status e acompanhamento por protocolo.
-- **RF-17** Listagem com filtros e atualização de status.
-- **RF-18** Excluir atendimento.
-- **RF-19** Valores controlados por listas: status, prioridade, canal, tipo de serviço.
+- Cada setor possui uma fila.
+- O primeiro profissional disponível assume manualmente.
+- Atendentes e técnicos podem assumir.
+- Um profissional pode manter vários atendimentos ativos, sem limite inicial.
+- O registro deve conter pelo menos:
+  - cliente e contato;
+  - setor;
+  - data e hora da primeira mensagem;
+  - data e hora em que foi assumido;
+  - profissional responsável;
+  - histórico completo de mensagens;
+  - data e hora do encerramento;
+  - indicação de chamado ou visita gerada.
 
-### 4.5 Dashboard e Relatórios
-- **RF-20** Exibir métricas-chave (volumes de técnicos, clientes, atendimentos).
-- **RF-21** Resumo diário de atendimentos por data.
-- **RF-22** Exportar dados em CSV.
+### 3.4 Encerramento
 
-### 4.6 Integração WhatsApp
-- **RF-23** Capturar mensagens (entrada e saída) de contatos individuais em tempo real.
-- **RF-24** Agrupar mensagens em conversas por número de contato.
-- **RF-25** Listar conversas com filtros por período e status (aberto/resolvido).
-- **RF-26** Visualizar o histórico de mensagens de uma conversa.
-- **RF-27** Vincular uma conversa a um atendimento.
-- **RF-28** Marcar status da conversa e registrar anotações.
-- **RF-29** Ignorar grupos, canais e broadcasts (apenas contatos individuais).
+- O atendimento só é encerrado quando o profissional clicar em **Finalizar atendimento**.
+- Campos obrigatórios:
+  - resultado;
+  - resumo do atendimento;
+  - sistema ou assunto relacionado.
+- Observações são opcionais.
+- O sistema/assunto é escolhido em catálogo administrável, com opção **Outro** para texto livre.
 
-### 4.7 Operação
-- **RF-30** Health check exibindo status, backend e volumes na sidebar.
-- **RF-31** Logging centralizado com rotação de arquivo.
+### 3.5 Fora do expediente
 
----
+- O sistema informa o horário de funcionamento.
+- A mensagem é registrada.
+- O cliente permanece na fila para o próximo expediente.
 
-## 5. Requisitos Não Funcionais
+## 4. CRM
 
-| Código | Requisito |
-|--------|-----------|
-| RNF-01 | **Usabilidade:** interface em português, design system próprio, responsiva para uso em celular na rede local. |
-| RNF-02 | **Segurança:** senhas com PBKDF2; segredos fora do versionamento (`secrets.toml`, `.env`); chave service_role do Supabase nunca commitada. |
-| RNF-03 | **Disponibilidade:** banco gerenciado (Supabase) com `pool_pre_ping` para resiliência de conexão. |
-| RNF-04 | **Custo:** operável em planos gratuitos (Streamlit + Supabase). |
-| RNF-05 | **Manutenibilidade:** arquitetura em camadas, validação por schemas Pydantic, exceções de domínio padronizadas. |
-| RNF-06 | **Portabilidade:** execução local via `.bat`, acesso remoto via Tailscale; bridge WhatsApp multiplataforma (Node.js). |
-| RNF-07 | **Observabilidade:** logs com rotação e health check operacional. |
-| RNF-08 | **Desempenho:** índices no banco para protocolo e data de abertura; autorefresh controlado na UI. |
+### 4.1 Empresa cliente
 
----
+Campos previstos:
 
-## 6. Arquitetura Técnica
+- nome;
+- CNPJ ou CPF;
+- endereço;
+- sistemas utilizados;
+- observações;
+- situação cadastral.
 
-### 6.1 Stack
-- **Front-end / App:** Python 3 + Streamlit, com `streamlit-autorefresh` e Plotly.
-- **Validação:** Pydantic v2.
-- **Persistência:** PostgreSQL gerenciado (Supabase) via SQLAlchemy + psycopg2.
-- **Integração WhatsApp:** Node.js com `whatsapp-web.js`, gravando no Supabase via REST API.
+### 4.2 Contatos
 
-### 6.2 Camadas
-```
-main.py            → ponto de entrada e roteamento de páginas
- └─ ui.py          → componentes e páginas Streamlit
-     └─ backend.py → fachada estável para a UI
-         └─ services.py     → regras de negócio (CRMService)
-             └─ repositories.py → acesso a dados (SQLAlchemy)
-                 └─ PostgreSQL/Supabase
-auth.py            → autenticação + RBAC
-models.py          → schemas Pydantic
-config.py          → constantes, listas controladas, URL do banco
-errors.py          → exceções de domínio
-app_logging.py     → logging com rotação
-whatsapp_parser.py → leitura/escrita das conversas WhatsApp
-backend/whatsapp-bridge/ → captura de mensagens (Node.js)
-```
+- Uma empresa cliente pode possuir vários contatos.
+- Cada contato possui telefone, nome, e-mail e função, quando disponíveis.
+- O telefone do WhatsApp é a identificação inicial.
+- Os dados podem ser complementados durante ou após o atendimento.
+- O histórico de atendimentos e visitas deve ser consultável na ficha do cliente.
 
-### 6.3 Modelo de Dados (principais tabelas)
-- `technicians` — equipe técnica.
-- `clients` — base de clientes.
-- `attendances` — atendimentos (FK para técnico e cliente; protocolo único).
-- `users` — autenticação e permissões (`allowed_pages`, `can_actions`).
-- `whatsapp_conversations` — conversa por número, com vínculo opcional a atendimento.
-- `whatsapp_messages` — mensagens individuais (direção in/out, dedup por `wa_message_id`).
+### 4.3 Sistemas e assuntos
 
-Schema versionado em `supabase_schema.sql`.
+- Administradores mantêm o catálogo de sistemas/assuntos.
+- O catálogo é usado no encerramento dos atendimentos e nos relatórios.
+- A opção **Outro** exige uma descrição livre.
 
-### 6.4 Implantação
-- Aplicação Streamlit executada localmente (`run_app.bat`) com acesso na rede
-  local ou remoto via Tailscale (`start_with_tunnel.bat`).
-- Bridge WhatsApp iniciado separadamente (`start_whatsapp.bat`); sessão
-  persistida localmente após leitura do QR code.
-- Segredos: `frontend/streamlit/.streamlit/secrets.toml` (app) e `backend/whatsapp-bridge/.env` (bridge).
+## 5. Chamados e visitas técnicas
 
----
+### 5.1 Abertura
 
-## 7. Premissas e Dependências
-- Conta e projeto **Supabase** provisionados, com schema aplicado.
-- **Node.js** instalado na máquina que roda o bridge WhatsApp.
-- Um número de WhatsApp dedicado para a operação técnica.
-- Conexão de internet estável para o bridge e o banco gerenciado.
+- Um atendimento do WhatsApp não gera automaticamente uma visita.
+- Quem estiver conduzindo o atendimento decide se é necessário abrir o chamado.
+- Essa pessoa escolhe o técnico responsável.
+- O atendente pode combinar a data com o cliente ou deixar o agendamento como **Não definido**.
+- O chamado permanece vinculado ao atendimento de origem, cliente, contato e conversa.
 
----
+### 5.2 Status
 
-## 8. Riscos e Mitigações
+Fluxo da visita:
 
-| Risco | Impacto | Mitigação |
-|-------|---------|-----------|
-| Credenciais padrão fracas no seed inicial | Acesso indevido | Forçar troca de senha no primeiro acesso (backlog) |
-| Bridge WhatsApp depende de sessão não oficial (`whatsapp-web.js`) | Quebra com mudanças do WhatsApp | Monitorar reconexão automática; avaliar API oficial no futuro |
-| Timestamps armazenados como TEXT | Limita consultas por data no banco | Migrar para tipo `TIMESTAMP` (backlog) |
-| Documentação desatualizada (cita SQLite) | Confusão de manutenção | Atualizar README e `health_check` (backlog) |
-| Arquivos legados (Excel/Sheets) no repositório | Ruído de manutenção | Remover backends não utilizados |
+`Pendente → Agendada → Em atendimento → Concluída`
 
----
+Uma visita também pode ser `Cancelada`.
 
-## 9. Roadmap Sugerido
+### 5.3 Alteração de agendamento
 
-### Curto prazo (correções e higiene)
-- Atualizar README e `health_check` para refletir PostgreSQL/Supabase.
-- Remover backends legados (Excel/Google Sheets) não utilizados.
-- Forçar troca das senhas padrão no primeiro login.
-- Migrar validadores Pydantic para a sintaxe v2 (`@field_validator`).
+O técnico responsável pode alterar a data, mas deve informar o motivo. O histórico deve registrar:
 
-### Médio prazo (evolução de produto)
-- Filtros e busca avançada na lista de atendimentos.
-- Indicadores de produtividade por técnico no dashboard.
-- Alertas de prazo (SLA) para atendimentos próximos do vencimento.
-- Envio de mensagens WhatsApp a partir do CRM.
+- data e hora da alteração;
+- usuário responsável;
+- valor anterior;
+- novo valor;
+- motivo.
 
-### Longo prazo (escala)
-- Multi-tenant para atender múltiplas operações.
-- App mobile / PWA dedicado.
-- Módulo financeiro (orçamento, faturamento).
-- Testes automatizados e pipeline de CI.
+### 5.4 Conclusão
 
----
+Campos disponíveis:
 
-## 10. Métricas de Acompanhamento do Produto
-- Nº de atendimentos registrados / período.
-- Tempo médio de resolução por atendimento.
-- Atendimentos abertos vs. concluídos.
-- Avaliação média do cliente (1–5).
-- Conversas de WhatsApp vinculadas a atendimentos.
-- Usuários ativos por perfil.
+- resultado;
+- descrição do serviço executado;
+- tempo gasto;
+- materiais utilizados;
+- fotos.
+
+Somente resultado e descrição do serviço são obrigatórios.
+
+### 5.5 Painel de visitas
+
+- Visualização em calendário e lista.
+- Filtros por técnico e status.
+- Todos podem visualizar todas as visitas.
+- Alterações respeitam as permissões do perfil.
+- O técnico recebe notificação dentro do sistema quando uma visita lhe é atribuída.
+
+## 6. Dashboard e relatórios
+
+### 6.1 Dashboard operacional
+
+Deve destacar:
+
+- fila atual;
+- atendimentos ativos;
+- visitas do dia;
+- últimos atendimentos pelo WhatsApp;
+- últimas visitas;
+- alertas e notificações.
+
+Cada profissional vê seus próprios indicadores. Administradores e supervisores veem toda a equipe.
+
+### 6.2 Relatórios
+
+- atendimentos por profissional, setor e período;
+- visitas por técnico, status e período;
+- sistemas e assuntos mais solicitados;
+- tempo de espera e tempo de atendimento;
+- conversão de atendimentos em visitas;
+- clientes com maior volume de solicitações.
+
+## 7. Requisitos não funcionais
+
+- Interface web responsiva e em português.
+- Atualizações em tempo real na fila e nas conversas.
+- Senhas protegidas com hash forte.
+- Autorização aplicada no backend por perfil.
+- Segredos obrigatórios e sem valores padrão em produção.
+- Auditoria das alterações relevantes.
+- Histórico não deve ser apagado ao iniciar ou reconectar o WhatsApp.
+- Build, typecheck e testes automatizados no pipeline.
+- Preservar isolamento por empresa, apesar da operação inicial single-company.
+
+## 8. Integração WhatsApp
+
+- A primeira versão opera com um único número.
+- A escolha do provedor permanece pendente.
+- A decisão deverá considerar as mudanças recentes da Meta, custo, estabilidade, suporte a webhooks, mídia, histórico, templates e risco de bloqueio.
+- O domínio de atendimento não deve depender de um provedor específico.
+
+## 9. Fora do escopo inicial
+
+- múltiplas empresas em operação comercial;
+- múltiplos números de WhatsApp;
+- aplicativo móvel nativo;
+- financeiro, faturamento e emissão de notas;
+- distribuição automática por carga;
+- IA para classificação automática do setor;
+- notificações de visita por e-mail ou WhatsApp.
+
+## 10. Critérios de sucesso
+
+- Todo contato recebido gera um atendimento rastreável.
+- Nenhuma conversa é perdida enquanto aguarda na fila.
+- É possível saber quem atendeu, quando assumiu e como encerrou.
+- Visitas permanecem ligadas ao atendimento que as originou.
+- Alterações de agendamento são auditáveis.
+- Gestão consegue consultar volume, produtividade e principais assuntos.
+- Operação diária não depende de planilhas paralelas.

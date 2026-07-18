@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────
+# Render Blueprint — SigmaCRM API
+# Fica na RAIZ do repositório git (SigmaCRM/), pois é onde o Render
+# procura o blueprint. rootDir aponta para o monorepo real.
+# Runtime Node nativo (Render já inclui OpenSSL para o Prisma).
+# ─────────────────────────────────────────────────────────────
+services:
+  - type: web
+    name: sigmacrm-api
+    runtime: node
+    plan: free
+    rootDir: SigmaAtendimento
+    buildCommand: npm install && npx prisma generate --schema=apps/api/prisma/schema.prisma && npm run build:api
+    # Render injeta a porta via env PORT; server.ts já usa process.env.PORT.
+    startCommand: node apps/api/dist/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # ── Não-secretos (versionados) ──
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: WHATSAPP_PROVIDER
+        value: meta-cloud
+      - key: META_WHATSAPP_API_BASE_URL
+        value: https://graph.facebook.com/v20.0
+      - key: META_WHATSAPP_VERIFY_TOKEN
+        value: sigma_verify_token_123
+      # ── Secretos: preencher no dashboard do Render (sync:false NÃO commita valor) ──
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: META_WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: META_WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      - key: SIGMA_INTERNAL_TOKEN
+        sync: false
+      # Preencher depois que o front estiver no Vercel:
+      - key: CORS_ORIGIN
+        sync: false

@@ -6,6 +6,7 @@ import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
@@ -13,7 +14,8 @@ type TicketStatus =
     | 'NEW' | 'QUEUED' | 'IN_PROGRESS' | 'WAITING_CUSTOMER' | 'WAITING_INTERNAL'
     | 'SCHEDULED_FIELD_SERVICE' | 'RESOLVED' | 'CLOSED' | 'CANCELED';
 type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-type ServiceType = 'PRESENCIAL' | 'REMOTO';
+type ServiceType = 'PRESENCIAL' | 'REMOTO' | 'HIBRIDO';
+type FieldVisitStatus = 'PENDING' | 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELED';
 
 interface UserOption {
     id: string;
@@ -29,6 +31,15 @@ interface TimelineEvent {
     createdAt: string;
 }
 
+interface ScheduleChange {
+    id: string;
+    previousScheduledAt?: string | null;
+    newScheduledAt?: string | null;
+    reason: string;
+    createdAt: string;
+    changedByUser?: { name: string } | null;
+}
+
 interface TicketDetailData {
     id: string;
     protocol?: string | null;
@@ -37,19 +48,35 @@ interface TicketDetailData {
     priority: TicketPriority;
     status: TicketStatus;
     notesInternal?: string | null;
-    contact: { name?: string | null; phone: string };
-    customer?: { name: string } | null;
+    contact: {
+        id: string;
+        name?: string | null;
+        phone: string;
+        email?: string | null;
+        customerId?: string | null;
+        businessId?: string | null;
+        business?: { id: string; name: string; cnpj: string } | null;
+    };
+    customer?: { id: string; name: string; document?: string | null; businesses?: Array<{ id: string; name: string; cnpj: string }> } | null;
     assignedUser?: { id: string; name: string } | null;
     department?: { name: string } | null;
     fieldService?: {
         serviceType?: ServiceType;
+        status?: FieldVisitStatus;
         equipment?: string | null;
+        scheduledAt?: string | null;
         visitAddress?: string | null;
         visitWindowStart?: string | null;
         visitWindowEnd?: string | null;
         technicianId?: string | null;
         technician?: { id: string; name: string } | null;
         resolution?: string | null;
+        result?: string | null;
+        serviceDescription?: string | null;
+        materialsUsed?: string | null;
+        photos?: string[] | null;
+        hoursSpent?: number | null;
+        scheduleChanges?: ScheduleChange[];
     } | null;
     evaluation?: { rating: number; comment?: string | null } | null;
     timeline?: TimelineEvent[];
@@ -64,11 +91,28 @@ interface TicketFormState {
     description: string;
     notesInternal: string;
     serviceType: ServiceType;
+    fieldVisitStatus: FieldVisitStatus;
     equipment: string;
     technicianId: string;
+    scheduledAt: string;
+    scheduleChangeReason: string;
     visitAddress: string;
     visitWindowStart: string;
     visitWindowEnd: string;
+    result: string;
+    serviceDescription: string;
+    materialsUsed: string;
+    photos: string;
+    hoursSpent: string;
+}
+
+interface CustomerFormState {
+    customerName: string;
+    customerDocument: string;
+    contactName: string;
+    contactPhone: string;
+    businessName: string;
+    businessCnpj: string;
 }
 
 const statusLabels: Record<TicketStatus, string> = {
@@ -93,6 +137,14 @@ const transitionMap: Record<TicketStatus, TicketStatus[]> = {
     RESOLVED: ['CLOSED', 'IN_PROGRESS'],
     CLOSED: [],
     CANCELED: [],
+};
+
+const fieldVisitStatusLabels: Record<FieldVisitStatus, string> = {
+    PENDING: 'Pendente',
+    SCHEDULED: 'Agendada',
+    IN_PROGRESS: 'Em atendimento',
+    COMPLETED: 'Concluída',
+    CANCELED: 'Cancelada',
 };
 
 function toDatetimeLocal(value?: string | null) {
@@ -121,6 +173,103 @@ function Stars({ rating }: { rating: number }) {
     );
 }
 
+function CustomerEditModal({
+    open,
+    form,
+    loading,
+    onChange,
+    onClose,
+    onSubmit,
+}: {
+    open: boolean;
+    form: CustomerFormState;
+    loading: boolean;
+    onChange: (next: CustomerFormState) => void;
+    onClose: () => void;
+    onSubmit: () => Promise<void>;
+}) {
+    const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose);
+    if (!open) return null;
+
+    return (
+        <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="customer-edit-title">
+            <div className="w-full max-w-2xl rounded-2xl border border-border bg-surface p-6 shadow-lifted">
+                <div className="mb-5">
+                    <h2 id="customer-edit-title" className="text-xl font-semibold text-foreground">Editar cliente do chamado</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                        Atualize os dados do cliente e do contato sem sair do chamado.
+                    </p>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                    <label className="block space-y-1.5">
+                        <span className="block text-sm font-medium text-foreground">Cliente / empresa</span>
+                        <input
+                            value={form.customerName}
+                            onChange={(event) => onChange({ ...form, customerName: event.target.value })}
+                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                        />
+                    </label>
+                    <label className="block space-y-1.5">
+                        <span className="block text-sm font-medium text-foreground">Nome do contato</span>
+                        <input
+                            value={form.contactName}
+                            onChange={(event) => onChange({ ...form, contactName: event.target.value })}
+                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                        />
+                    </label>
+                    <label className="block space-y-1.5">
+                        <span className="block text-sm font-medium text-foreground">Documento do cliente</span>
+                        <input
+                            value={form.customerDocument}
+                            onChange={(event) => onChange({ ...form, customerDocument: event.target.value })}
+                            placeholder="CPF ou CNPJ opcional"
+                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                        />
+                    </label>
+                    <label className="block space-y-1.5">
+                        <span className="block text-sm font-medium text-foreground">Telefone / WhatsApp</span>
+                        <input
+                            value={form.contactPhone}
+                            onChange={(event) => onChange({ ...form, contactPhone: event.target.value })}
+                            placeholder="DDD + numero"
+                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                        />
+                    </label>
+                    <label className="block space-y-1.5">
+                        <span className="block text-sm font-medium text-foreground">Empresa vinculada</span>
+                        <input
+                            value={form.businessName}
+                            onChange={(event) => onChange({ ...form, businessName: event.target.value })}
+                            placeholder="Opcional"
+                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                        />
+                    </label>
+                    <label className="block space-y-1.5 md:col-span-2">
+                        <span className="block text-sm font-medium text-foreground">CNPJ da empresa</span>
+                        <input
+                            value={form.businessCnpj}
+                            onChange={(event) => onChange({ ...form, businessCnpj: event.target.value })}
+                            placeholder="Opcional, somente quando houver empresa/CNPJ"
+                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                        />
+                        <span className="text-xs text-muted-foreground">Para pessoa fisica, deixe empresa e CNPJ em branco e use o campo Documento do cliente se quiser informar CPF.</span>
+                    </label>
+                </div>
+
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" onClick={onClose} disabled={loading}>
+                        Cancelar
+                    </Button>
+                    <Button type="button" loading={loading} onClick={onSubmit}>
+                        Salvar cliente
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function TicketDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -131,6 +280,17 @@ export default function TicketDetail() {
     const [form, setForm] = useState<TicketFormState | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [savingCustomer, setSavingCustomer] = useState(false);
+    const [notifyingGroup, setNotifyingGroup] = useState(false);
+    const [customerEditorOpen, setCustomerEditorOpen] = useState(false);
+    const [customerForm, setCustomerForm] = useState<CustomerFormState>({
+        customerName: '',
+        customerDocument: '',
+        contactName: '',
+        contactPhone: '',
+        businessName: '',
+        businessCnpj: '',
+    });
     const [error, setError] = useState<string | null>(null);
 
     const loadTicket = () => {
@@ -148,11 +308,19 @@ export default function TicketDetail() {
                     description: data.description || '',
                     notesInternal: data.notesInternal || '',
                     serviceType: data.fieldService?.serviceType || 'REMOTO',
+                    fieldVisitStatus: data.fieldService?.status || 'PENDING',
                     equipment: data.fieldService?.equipment || '',
                     technicianId: data.fieldService?.technician?.id || data.fieldService?.technicianId || '',
+                    scheduledAt: toDatetimeLocal(data.fieldService?.scheduledAt),
+                    scheduleChangeReason: '',
                     visitAddress: data.fieldService?.visitAddress || '',
                     visitWindowStart: toDatetimeLocal(data.fieldService?.visitWindowStart),
                     visitWindowEnd: toDatetimeLocal(data.fieldService?.visitWindowEnd),
+                    result: data.fieldService?.result || data.fieldService?.resolution || '',
+                    serviceDescription: data.fieldService?.serviceDescription || '',
+                    materialsUsed: data.fieldService?.materialsUsed || '',
+                    photos: Array.isArray(data.fieldService?.photos) ? data.fieldService.photos.join('\n') : '',
+                    hoursSpent: data.fieldService?.hoursSpent?.toString() || '',
                 });
             })
             .catch((err) => {
@@ -179,6 +347,52 @@ export default function TicketDetail() {
         return [ticket.status, ...transitionMap[ticket.status]].filter((value, index, list) => list.indexOf(value) === index);
     }, [ticket]);
 
+    const openCustomerEditor = () => {
+        if (!ticket) return;
+        const business = ticket.contact.business || ticket.customer?.businesses?.[0] || null;
+        setCustomerForm({
+            customerName: ticket.customer?.name || ticket.contact.name || '',
+            customerDocument: ticket.customer?.document || '',
+            contactName: ticket.contact.name || '',
+            contactPhone: ticket.contact.phone || '',
+            businessName: business?.name || '',
+            businessCnpj: business?.cnpj || '',
+        });
+        setCustomerEditorOpen(true);
+    };
+
+    const saveCustomerInfo = async () => {
+        if (!id) return;
+        setSavingCustomer(true);
+        setError(null);
+
+        try {
+            const updated = await apiRequest<TicketDetailData>(`/api/tickets/${id}/customer-info`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                    customerName: customerForm.customerName.trim() || null,
+                    customerDocument: customerForm.customerDocument.trim() || null,
+                    contactName: customerForm.contactName.trim() || null,
+                    contactPhone: customerForm.contactPhone.trim() || null,
+                    businessName: customerForm.businessName.trim() || null,
+                    businessCnpj: customerForm.businessCnpj.trim() || null,
+                }),
+            });
+            setTicket(updated);
+            setCustomerEditorOpen(false);
+            showToast({ title: 'Cliente atualizado', description: 'Os dados do cliente foram salvos no chamado.', variant: 'success' });
+            loadTicket();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                const message = err instanceof Error ? err.message : 'Erro ao atualizar cliente.';
+                setError(message);
+                showToast({ title: 'Erro ao atualizar cliente', description: message, variant: 'error' });
+            }
+        } finally {
+            setSavingCustomer(false);
+        }
+    };
+
     const saveTicket = async (event: FormEvent) => {
         event.preventDefault();
         if (!id || !form) return;
@@ -186,6 +400,10 @@ export default function TicketDetail() {
         setError(null);
 
         try {
+            const photos = form.photos
+                .split('\n')
+                .map((item) => item.trim())
+                .filter(Boolean);
             const updated = await apiRequest<TicketDetailData>(`/api/tickets/${id}`, {
                 method: 'PATCH',
                 body: JSON.stringify({
@@ -195,11 +413,20 @@ export default function TicketDetail() {
                     description: form.description || null,
                     notesInternal: form.notesInternal || null,
                     serviceType: form.serviceType,
+                    fieldVisitStatus: form.fieldVisitStatus,
                     equipment: form.equipment || null,
                     technicianId: form.technicianId || null,
+                    scheduledAt: fromDatetimeLocal(form.scheduledAt),
+                    scheduleChangeReason: form.scheduleChangeReason || null,
                     visitAddress: form.visitAddress || null,
                     visitWindowStart: fromDatetimeLocal(form.visitWindowStart),
                     visitWindowEnd: fromDatetimeLocal(form.visitWindowEnd),
+                    result: form.result || null,
+                    resolution: form.result || null,
+                    serviceDescription: form.serviceDescription || null,
+                    materialsUsed: form.materialsUsed || null,
+                    photos,
+                    hoursSpent: form.hoursSpent ? Number(form.hoursSpent) : null,
                 }),
             });
             setTicket(updated);
@@ -213,6 +440,32 @@ export default function TicketDetail() {
             }
         } finally {
             setSaving(false);
+        }
+    };
+
+    const sendTicketGroupNotification = async () => {
+        if (!id) return;
+        setNotifyingGroup(true);
+        setError(null);
+
+        try {
+            const result = await apiRequest<{ ok: boolean; groupName?: string | null; groupId?: string }>(`/api/tickets/${id}/notify-group`, {
+                method: 'POST',
+            });
+            showToast({
+                title: 'Enviado para o grupo',
+                description: result.groupName ? `Aviso enviado para ${result.groupName}.` : 'Aviso enviado para o grupo configurado.',
+                variant: 'success',
+            });
+            loadTicket();
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                const message = err instanceof Error ? err.message : 'Erro ao enviar aviso para o grupo.';
+                setError(message);
+                showToast({ title: 'Erro ao enviar para o grupo', description: message, variant: 'error' });
+            }
+        } finally {
+            setNotifyingGroup(false);
         }
     };
 
@@ -316,13 +569,22 @@ export default function TicketDetail() {
                                     </div>
 
                                     <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
-                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Field service</h2>
+                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Visita técnica</h2>
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <label>
                                                 <span className="mb-1 block text-sm font-medium text-foreground">Tipo</span>
                                                 <select value={form.serviceType} onChange={(event) => setForm({ ...form, serviceType: event.target.value as ServiceType })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
                                                     <option value="REMOTO">Remoto</option>
                                                     <option value="PRESENCIAL">Presencial</option>
+                                                    <option value="HIBRIDO">Híbrido</option>
+                                                </select>
+                                            </label>
+                                            <label>
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Status da visita</span>
+                                                <select value={form.fieldVisitStatus} onChange={(event) => setForm({ ...form, fieldVisitStatus: event.target.value as FieldVisitStatus })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
+                                                    {Object.entries(fieldVisitStatusLabels).map(([value, label]) => (
+                                                        <option key={value} value={value}>{label}</option>
+                                                    ))}
                                                 </select>
                                             </label>
                                             <label>
@@ -337,6 +599,10 @@ export default function TicketDetail() {
                                                 <input value={form.equipment} onChange={(event) => setForm({ ...form, equipment: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
                                             </label>
                                             <label>
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Data combinada</span>
+                                                <input type="datetime-local" value={form.scheduledAt} onChange={(event) => setForm({ ...form, scheduledAt: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                            </label>
+                                            <label>
                                                 <span className="mb-1 block text-sm font-medium text-foreground">Endereço da visita</span>
                                                 <input value={form.visitAddress} onChange={(event) => setForm({ ...form, visitAddress: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
                                             </label>
@@ -347,6 +613,45 @@ export default function TicketDetail() {
                                             <label>
                                                 <span className="mb-1 block text-sm font-medium text-foreground">Fim da janela</span>
                                                 <input type="datetime-local" value={form.visitWindowEnd} onChange={(event) => setForm({ ...form, visitWindowEnd: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                            </label>
+                                            {form.scheduledAt !== toDatetimeLocal(ticket.fieldService?.scheduledAt) && (
+                                                <label className="md:col-span-2">
+                                                    <span className="mb-1 block text-sm font-medium text-foreground">Motivo da alteração de agenda</span>
+                                                    <textarea
+                                                        value={form.scheduleChangeReason}
+                                                        onChange={(event) => setForm({ ...form, scheduleChangeReason: event.target.value })}
+                                                        rows={3}
+                                                        required
+                                                        placeholder="Explique por que a data combinada foi alterada."
+                                                        className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                                    />
+                                                </label>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
+                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Execução da visita</h2>
+                                        <div className="grid gap-4 md:grid-cols-2">
+                                            <label>
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Tempo gasto (horas)</span>
+                                                <input type="number" min="0" step="0.25" value={form.hoursSpent} onChange={(event) => setForm({ ...form, hoursSpent: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                            </label>
+                                            <label>
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Resultado</span>
+                                                <input value={form.result} onChange={(event) => setForm({ ...form, result: event.target.value })} placeholder="Ex.: resolvido, aguardando peça..." className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                            </label>
+                                            <label className="md:col-span-2">
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Serviço executado</span>
+                                                <textarea value={form.serviceDescription} onChange={(event) => setForm({ ...form, serviceDescription: event.target.value })} rows={4} className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                            </label>
+                                            <label className="md:col-span-2">
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Materiais utilizados</span>
+                                                <textarea value={form.materialsUsed} onChange={(event) => setForm({ ...form, materialsUsed: event.target.value })} rows={3} placeholder="Opcional" className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
+                                            </label>
+                                            <label className="md:col-span-2">
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Fotos / anexos</span>
+                                                <textarea value={form.photos} onChange={(event) => setForm({ ...form, photos: event.target.value })} rows={3} placeholder="Cole uma URL por linha. Upload de arquivos pode entrar em uma próxima etapa." className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
                                             </label>
                                         </div>
                                     </div>
@@ -361,8 +666,25 @@ export default function TicketDetail() {
                                             <div><dt className="text-muted-foreground">Responsável</dt><dd className="font-medium text-foreground">{ticket.assignedUser?.name || 'Não atribuído'}</dd></div>
                                             <div><dt className="text-muted-foreground">Criado em</dt><dd className="font-medium text-foreground">{formatDate(ticket.createdAt)}</dd></div>
                                         </dl>
-                                        <Button type="submit" loading={saving} className="mt-5 w-full">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={openCustomerEditor}
+                                            className="mt-5 w-full"
+                                        >
+                                            Editar cliente
+                                        </Button>
+                                        <Button type="submit" loading={saving} className="mt-3 w-full">
                                             Salvar alterações
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            loading={notifyingGroup}
+                                            onClick={sendTicketGroupNotification}
+                                            className="mt-3 w-full"
+                                        >
+                                            Enviar para grupo
                                         </Button>
                                     </div>
 
@@ -378,6 +700,31 @@ export default function TicketDetail() {
                                                 icon="sentiment_satisfied"
                                                 title="Sem avaliação registrada"
                                                 description="O CSAT aparecerá aqui quando o cliente avaliar o atendimento."
+                                            />
+                                        )}
+                                    </div>
+
+                                    <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
+                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Alterações de agenda</h2>
+                                        {ticket.fieldService?.scheduleChanges?.length ? (
+                                            <div className="space-y-4">
+                                                {ticket.fieldService.scheduleChanges.map((change) => (
+                                                    <div key={change.id} className="rounded-xl border border-border bg-surface-alt p-3 text-sm">
+                                                        <p className="font-semibold text-foreground">
+                                                            {formatDate(change.previousScheduledAt)} → {formatDate(change.newScheduledAt)}
+                                                        </p>
+                                                        <p className="mt-1 text-muted-foreground">{change.reason}</p>
+                                                        <p className="mt-2 text-xs text-muted-foreground">
+                                                            {change.changedByUser?.name || 'Sistema'} em {formatDate(change.createdAt)}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <EmptyState
+                                                icon="schedule"
+                                                title="Sem alterações"
+                                                description="Quando a data combinada mudar, o motivo ficará registrado aqui."
                                             />
                                         )}
                                     </div>
@@ -408,6 +755,14 @@ export default function TicketDetail() {
                     )}
                 </div>
             </main>
+            <CustomerEditModal
+                open={customerEditorOpen}
+                form={customerForm}
+                loading={savingCustomer}
+                onChange={setCustomerForm}
+                onClose={() => setCustomerEditorOpen(false)}
+                onSubmit={saveCustomerInfo}
+            />
         </div>
     );
 }

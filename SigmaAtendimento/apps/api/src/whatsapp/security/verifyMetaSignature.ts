@@ -3,10 +3,10 @@ import crypto from 'crypto';
 /** Valida o header X-Hub-Signature-256 enviado pela Meta. */
 export function verifyMetaSignature(rawBody: Buffer, signatureHeader?: string): boolean {
   const appSecret = process.env.META_APP_SECRET;
-  // Sem secret configurado → não bloqueia (dev/mock). Logue um aviso.
+  // Webhook real sempre falha fechado quando o segredo não está configurado.
   if (!appSecret) {
-    console.warn('[SIGMA] META_APP_SECRET não configurado — assinatura do webhook NÃO validada.');
-    return true;
+    console.error('[SIGMA] META_APP_SECRET não configurado — webhook rejeitado.');
+    return false;
   }
   if (!signatureHeader) return false;
 

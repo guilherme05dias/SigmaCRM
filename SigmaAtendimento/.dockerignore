@@ -1,0 +1,17 @@
+# Nunca enviar para o build context / imagem:
+**/node_modules
+**/dist
+.git
+**/*.log
+**/*.db
+
+# SEGREDOS — jamais entram na imagem (mantém .env.example)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Artefatos de build do front (a API não precisa)
+apps/web/dist
+
+# Pastas legadas fora do monorepo (não fazem parte do build da API)
+stitch_exports

@@ -23,13 +23,13 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
                     "disabled:pointer-events-none disabled:opacity-50",
                     {
                         // variants
-                        "bg-primary text-primary-fg shadow-primary-glow hover:bg-primary-700": variant === "primary",
+                        "bg-primary-solid text-primary-solid-fg shadow-none hover:bg-primary-solid-hover": variant === "primary",
                         "bg-primary-50 text-primary-700 border border-primary-200 hover:bg-primary-100": variant === "secondary",
-                        "border border-border bg-surface text-foreground hover:bg-surface-alt shadow-sm": variant === "outline",
+                        "border border-border bg-surface text-foreground shadow-none hover:bg-surface-alt": variant === "outline",
                         "bg-transparent text-muted-foreground hover:bg-surface-alt hover:text-foreground": variant === "ghost",
-                        "bg-danger text-white hover:bg-danger-fg": variant === "danger",
+                        "bg-danger-solid text-danger-solid-fg hover:bg-danger-solid-hover": variant === "danger",
                         // sizes (min 44px toque em md/lg)
-                        "h-9 px-4 text-sm": size === "sm",
+                        "min-h-11 px-4 text-sm": size === "sm",
                         "h-11 px-6 text-sm": size === "md",
                         "h-12 px-8 text-base": size === "lg",
                         "h-11 w-11 p-0": size === "icon",

@@ -1,15 +1,40 @@
 import { Router } from 'express';
-import { ConversationStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
+import { ConversationStatus, FieldVisitStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
 import { getIO, emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { canViewAll } from '../middlewares/authorization.middleware';
 import { getCompanyId } from '../lib/tenant';
 import { generateProtocol } from '../services/protocol.service';
 import { prisma } from '../lib/prisma';
 import { sendTextWithOutbox } from '../services/whatsappOutbox.service';
+import { notifyConversationTransferred, notifyFieldVisitAssigned } from '../services/notification.service';
 import { rateLimit } from '../middlewares/rateLimit.middleware';
+import { cancelConversationFallback } from '../services/conversationFallback.service';
 import { z } from 'zod';
+import { getWhatsAppProvider } from '../whatsapp';
+import { formatContactDisplayName } from '../lib/contactDisplayName';
 
 const router = Router();
+const whatsappProvider = getWhatsAppProvider();
+
+function conversationScope(req: any) {
+    const requestedScope = req.query?.scope === 'mine' ? 'mine' : 'all';
+    if (canViewAll(req.user?.role) && requestedScope === 'all') return {};
+    const userId = req.user?.id;
+    if (!userId) return { id: '__NO_USER__' };
+
+    return {
+        OR: [
+            { status: ConversationStatus.OPEN },
+            { assignedUserId: userId },
+        ],
+    };
+}
+
+function canOperateConversation(req: any, conversation: { assignedUserId?: string | null }) {
+    if (canViewAll(req.user?.role)) return true;
+    return Boolean(req.user?.id && conversation.assignedUserId === req.user.id);
+}
 
 const GetMessagesSchema = z.object({
     take: z.string().optional().transform(v => v ? parseInt(v, 10) : 50),
@@ -42,10 +67,22 @@ const CreateTicketFromConvSchema = z.object({
     serviceType: z.nativeEnum(ServiceType).optional(),
     equipment: z.string().optional().nullable(),
     visitAddress: z.string().optional().nullable(),
+    scheduledAt: z.string().datetime().optional().nullable(),
     visitWindowStart: z.string().datetime().optional().nullable(),
     visitWindowEnd: z.string().datetime().optional().nullable(),
     technicianId: z.string().uuid().optional().nullable(),
     notesInternal: z.string().optional().nullable(),
+});
+
+const CloseConversationSchema = z.object({
+    result: z.string().trim().min(1),
+    summary: z.string().trim().min(1),
+    serviceTopicId: z.string().uuid(),
+    customerBusinessId: z.string().uuid().optional().nullable(),
+    otherTopicDescription: z.string().trim().optional().nullable(),
+    notes: z.string().trim().optional().nullable(),
+    fieldServiceRequired: z.boolean().optional(),
+    sendSatisfactionSurvey: z.boolean().optional().default(true),
 });
 
 router.use(authMiddleware);
@@ -56,7 +93,7 @@ router.get('/conversations', async (req, res) => {
         const { status, assignedUserId, departmentId } = req.query;
         const companyId = getCompanyId(req);
 
-        const where: any = { companyId };
+        const where: any = { companyId, ...conversationScope(req) };
         if (status) where.status = status;
         if (assignedUserId) {
             where.assignedUserId = assignedUserId === 'unassigned' ? null : assignedUserId;
@@ -65,13 +102,14 @@ router.get('/conversations', async (req, res) => {
 
         const conversations = await prisma.conversation.findMany({
             where,
-            orderBy: { updatedAt: 'desc' },
+            orderBy: [{ lastMessageAt: 'desc' }, { id: 'desc' }],
             include: {
                 contact: true,
                 assignedUser: { select: { id: true, name: true, email: true } },
                 department: true,
+                serviceTopic: true,
                 messages: {
-                    orderBy: { createdAt: 'desc' },
+                    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
                     take: 1 // Only load last message for snippet
                 }
             }
@@ -95,7 +133,7 @@ router.get('/conversations/:id/messages', async (req, res) => {
         const { take, cursor } = parsed.data;
 
         const conversation = await prisma.conversation.findFirst({
-            where: { id: req.params.id, companyId },
+            where: { id: req.params.id, companyId, ...conversationScope(req) },
             select: { id: true },
         });
         if (!conversation) return res.status(404).json({ error: 'Conversation not found' });
@@ -104,7 +142,7 @@ router.get('/conversations/:id/messages', async (req, res) => {
             take: take + 1, // fetch one more to check if there is a next page
             where: { conversationId: req.params.id, companyId },
             ...(cursor && { skip: 1, cursor: { id: cursor } }),
-            orderBy: { createdAt: 'desc' }, // Order descending to get the latest messages
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], // Order descending to get the latest messages
             include: {
                 user: {
                     select: {
@@ -146,6 +184,9 @@ router.post('/conversations/:id/take', async (req, res) => {
         }
         const user = await prisma.user.findFirst({ where: { id: userId, companyId }, select: { id: true } });
         if (!user) return res.status(404).json({ error: 'Usuário não encontrado nesta empresa' });
+        if (!canViewAll(req.user?.role) && userId !== req.user?.id) {
+            return res.status(403).json({ error: 'Você só pode assumir atendimento para você mesmo' });
+        }
 
         const dataToUpdate: any = {
             assignedUserId: userId,
@@ -161,6 +202,7 @@ router.post('/conversations/:id/take', async (req, res) => {
             data: dataToUpdate,
             include: { contact: true, assignedUser: true, department: true }
         });
+        cancelConversationFallback(conversation.id);
         emitToCompany(conversation.companyId, 'conversation:updated', conversation);
         res.json(conversation);
     } catch (error) {
@@ -178,10 +220,21 @@ router.post('/conversations/:id/transfer', async (req, res) => {
         const { userId, departmentId } = parsed.data;
         const currentConversation = await prisma.conversation.findFirst({
             where: { id: req.params.id, companyId },
-            select: { id: true },
+            select: {
+                id: true,
+                assignedUserId: true,
+                status: true,
+                contact: { select: { name: true, phone: true } },
+            },
         });
         if (!currentConversation) {
             return res.status(404).json({ error: 'Conversation not found' });
+        }
+        if ((currentConversation as any).status === ConversationStatus.CLOSED) {
+            return res.status(409).json({ error: 'Conversa encerrada não pode ser transferida' });
+        }
+        if (!canOperateConversation(req, currentConversation)) {
+            return res.status(403).json({ error: 'Você não tem permissão para transferir esta conversa' });
         }
         if (userId) {
             const user = await prisma.user.findFirst({ where: { id: userId, companyId }, select: { id: true } });
@@ -191,6 +244,7 @@ router.post('/conversations/:id/transfer', async (req, res) => {
             const department = await prisma.department.findFirst({ where: { id: departmentId, companyId }, select: { id: true } });
             if (!department) return res.status(404).json({ error: 'Departamento não encontrado nesta empresa' });
         }
+        const previousAssignedUserId = currentConversation.assignedUserId ?? null;
         const data: any = {};
         if (userId !== undefined) data.assignedUserId = userId;
         if (departmentId !== undefined) data.departmentId = departmentId;
@@ -203,6 +257,19 @@ router.post('/conversations/:id/transfer', async (req, res) => {
             data,
             include: { contact: true, assignedUser: true, department: true }
         });
+        if (conversation.assignedUserId || conversation.departmentId || conversation.status !== ConversationStatus.OPEN) {
+            cancelConversationFallback(conversation.id);
+        }
+        if (conversation.assignedUserId && conversation.assignedUserId !== previousAssignedUserId) {
+            await notifyConversationTransferred({
+                companyId,
+                userId: conversation.assignedUserId,
+                conversationId: conversation.id,
+                contactName: conversation.contact?.name,
+                contactPhone: conversation.contact?.phone,
+                departmentName: conversation.department?.name,
+            });
+        }
         emitToCompany(conversation.companyId, 'conversation:updated', conversation);
         res.json(conversation);
     } catch (error) {
@@ -215,60 +282,142 @@ router.post('/conversations/:id/transfer', async (req, res) => {
 router.post('/conversations/:id/close', async (req, res) => {
     try {
         const conversationId = req.params.id;
+        const parsed = CloseConversationSchema.safeParse(req.body);
+
+        if (!parsed.success) {
+            return res.status(400).json({ error: 'Dados invalidos', details: parsed.error.issues });
+        }
         
         const companyId = getCompanyId(req);
         const currentConversation = await prisma.conversation.findFirst({
             where: { id: conversationId, companyId },
-            include: { contact: true },
+            include: {
+                contact: {
+                    include: {
+                        business: true,
+                        customer: {
+                            include: { businesses: { orderBy: { name: 'asc' } } },
+                        },
+                    },
+                },
+            },
         });
         if (!currentConversation) {
             return res.status(404).json({ error: 'Conversation not found' });
         }
+        if (currentConversation.status === ConversationStatus.CLOSED) {
+            return res.status(409).json({ error: 'Atendimento ja encerrado' });
+        }
+        if (!canOperateConversation(req, currentConversation)) {
+            return res.status(403).json({ error: 'Você precisa estar responsável por esta conversa para finalizá-la' });
+        }
+
+        const serviceTopic = await prisma.serviceTopic.findFirst({
+            where: { id: parsed.data.serviceTopicId, companyId, active: true },
+            select: { id: true, name: true },
+        });
+
+        if (!serviceTopic) {
+            return res.status(400).json({ error: 'Sistema/assunto invalido ou inativo' });
+        }
+
+        if (serviceTopic.name.trim().toLowerCase() === 'outro' && !parsed.data.otherTopicDescription?.trim()) {
+            return res.status(400).json({ error: 'Informe a descricao quando o assunto for Outro' });
+        }
+
+        const customerBusinesses = currentConversation.contact.customer?.businesses ?? [];
+        const selectedBusinessId = parsed.data.customerBusinessId || currentConversation.contact.businessId;
+        const selectedBusiness = selectedBusinessId
+            ? customerBusinesses.find((business) => business.id === selectedBusinessId)
+            : null;
+
+        if (selectedBusinessId && !selectedBusiness) {
+            return res.status(400).json({ error: 'Empresa invalida para este cliente' });
+        }
+        if (customerBusinesses.length > 0 && !selectedBusiness) {
+            return res.status(400).json({ error: 'Selecione a empresa atendida' });
+        }
 
         const closedAt = new Date();
+        const shouldRequestSatisfaction = parsed.data.sendSatisfactionSurvey && currentConversation.contact.includeInServiceReports;
         let totalHandleTimeSeconds = null;
         if (currentConversation.startedAt) {
             totalHandleTimeSeconds = Math.floor((closedAt.getTime() - currentConversation.startedAt.getTime()) / 1000);
         }
 
-        const conversation = await prisma.conversation.update({
-            where: { id: conversationId },
-            data: { 
-                status: ConversationStatus.CLOSED,
-                closedAt,
-                totalHandleTimeSeconds
-             },
-            include: { contact: true, assignedUser: true, department: true }
+        const personName = currentConversation.contact.name?.trim() || currentConversation.contact.phone;
+        const reportBusinessName = selectedBusiness?.name?.trim()
+            || currentConversation.contact.customer?.name?.trim()
+            || null;
+        const customerName = formatContactDisplayName({
+            personName,
+            phone: currentConversation.contact.phone,
+            companyName: reportBusinessName,
         });
+        const systemName = serviceTopic.name.trim().toLowerCase() === 'outro'
+            ? `Outro: ${parsed.data.otherTopicDescription?.trim()}`
+            : serviceTopic.name;
 
-        emitToCompany(conversation.companyId, 'conversation:updated', conversation);
+        const conversation = await prisma.$transaction(async (tx) => {
+            const updatedConversation = await tx.conversation.update({
+                where: { id: conversationId },
+                data: {
+                    status: ConversationStatus.CLOSED,
+                    closedAt,
+                    totalHandleTimeSeconds,
+                    closeResult: parsed.data.result,
+                    closeSummary: parsed.data.summary,
+                    closeNotes: parsed.data.notes || null,
+                    ratingRequestedAt: shouldRequestSatisfaction ? closedAt : null,
+                    serviceTopicId: serviceTopic.id,
+                    otherTopicDescription: parsed.data.otherTopicDescription || null,
+                    fieldServiceRequired: parsed.data.fieldServiceRequired ?? false,
+                },
+                include: { contact: true, assignedUser: true, department: true, serviceTopic: true },
+            });
 
-        // Fetch settings for closing message
-        const settings = await prisma.settings.findUnique({ where: { companyId } });
-        if (settings && settings.closingMessage) {
-            const systemMsg = await prisma.message.create({
+            await tx.conversationReport.create({
                 data: {
                     companyId,
                     conversationId,
-                    direction: MessageDirection.SYSTEM,
-                    type: MessageType.TEXT,
-                    body: settings.closingMessage
-                }
+                    customerName,
+                    businessName: reportBusinessName,
+                    businessCnpj: selectedBusiness?.cnpj ?? null,
+                    systemName,
+                    summary: parsed.data.summary,
+                    observation: parsed.data.notes || null,
+                    closedAt,
+                },
             });
-            getIO().to(`conversation:${conversationId}`).emit('message:new', systemMsg);
 
+            await tx.whatsAppOutbox.deleteMany({ where: { companyId, conversationId } });
+            await tx.whatsAppInboundEvent.deleteMany({ where: { companyId, conversationId } });
+            await tx.message.deleteMany({ where: { companyId, conversationId } });
+
+            return updatedConversation;
+        });
+        cancelConversationFallback(conversation.id);
+
+        // Encerramento e pesquisa de satisfação: a resposta numérica do cliente
+        // será registrada pelo webhook no atendimento recém-fechado.
+        const settings = await prisma.settings.findUnique({ where: { companyId } });
+        const satisfactionPrompt = 'De 1 a 10, qual nota você dá para este atendimento? Responda apenas com um número.';
+        const closingText = [
+            settings?.closingMessage?.trim(),
+            shouldRequestSatisfaction ? satisfactionPrompt : null,
+        ].filter(Boolean).join('\n\n');
+        if (closingText) {
             try {
-                await sendTextWithOutbox({
-                    companyId,
-                    conversationId,
-                    messageId: systemMsg.id,
-                    toPhone: conversation.contact.phone,
-                    body: settings.closingMessage,
+                await whatsappProvider.sendText({
+                    to: conversation.contact.phone,
+                    body: closingText,
                 });
             } catch (err) {
                 console.error('Error sending closing message via provider:', err);
             }
         }
+
+        emitToCompany(conversation.companyId, 'conversation:updated', { ...conversation, messages: [] });
         res.json(conversation);
     } catch (error) {
         console.error('Error closing conversation:', error);
@@ -294,6 +443,12 @@ router.post('/conversations/:id/messages', rateLimit(60_000, 60), async (req, re
 
         if (!conversation) {
             return res.status(404).json({ error: 'Conversation not found' });
+        }
+        if (conversation.status === ConversationStatus.CLOSED) {
+            return res.status(409).json({ error: 'Conversa encerrada não pode receber novas mensagens' });
+        }
+        if (!canOperateConversation(req, conversation)) {
+            return res.status(403).json({ error: 'Você precisa assumir esta conversa antes de responder' });
         }
 
         const messageType = type || MessageType.TEXT;
@@ -372,7 +527,7 @@ router.post('/conversations/:id/tickets', async (req, res) => {
         const companyId = getCompanyId(req);
         const {
             title, description, priority, customerId, serviceType, equipment,
-            visitAddress, visitWindowStart, visitWindowEnd,
+            visitAddress, scheduledAt, visitWindowStart, visitWindowEnd,
             technicianId, notesInternal
         } = parsed.data;
 
@@ -383,14 +538,20 @@ router.post('/conversations/:id/tickets', async (req, res) => {
         if (!conversation || conversation.companyId !== companyId) {
             return res.status(404).json({ error: 'Conversation not found' });
         }
+        if (conversation.status === ConversationStatus.CLOSED) {
+            return res.status(409).json({ error: 'Conversa encerrada não pode gerar novo chamado' });
+        }
+        if (!canOperateConversation(req, conversation)) {
+            return res.status(403).json({ error: 'Você precisa estar responsável por esta conversa para criar chamado' });
+        }
 
-        const hasFieldService = !!(technicianId || visitAddress || visitWindowStart || visitWindowEnd || equipment || serviceType);
+        const hasFieldService = !!(technicianId || visitAddress || scheduledAt || visitWindowStart || visitWindowEnd || equipment || serviceType);
         if (customerId) {
             const customer = await prisma.customer.findFirst({ where: { id: customerId, companyId }, select: { id: true } });
             if (!customer) return res.status(404).json({ error: 'Cliente não encontrado nesta empresa' });
         }
         if (technicianId) {
-            const technician = await prisma.user.findFirst({ where: { id: technicianId, companyId }, select: { id: true } });
+            const technician = await prisma.user.findFirst({ where: { id: technicianId, companyId, role: 'TECHNICIAN', active: true }, select: { id: true } });
             if (!technician) return res.status(404).json({ error: 'Técnico não encontrado nesta empresa' });
         }
 
@@ -407,7 +568,7 @@ router.post('/conversations/:id/tickets', async (req, res) => {
                     title,
                     description,
                     priority,
-                    status: TicketStatus.NEW,
+                    status: hasFieldService ? TicketStatus.SCHEDULED_FIELD_SERVICE : TicketStatus.NEW,
                     notesInternal,
                 },
             });
@@ -418,9 +579,11 @@ router.post('/conversations/:id/tickets', async (req, res) => {
                         ticketId: created.id,
                         technicianId: technicianId ?? undefined,
                         serviceType: serviceType ?? ServiceType.PRESENCIAL,
+                        status: scheduledAt ? FieldVisitStatus.SCHEDULED : FieldVisitStatus.PENDING,
                         equipment: equipment ?? undefined,
                         onSiteRequired: true,
                         visitAddress: visitAddress ?? undefined,
+                        scheduledAt: scheduledAt ? new Date(scheduledAt) : undefined,
                         visitWindowStart: visitWindowStart ? new Date(visitWindowStart) : undefined,
                         visitWindowEnd: visitWindowEnd ? new Date(visitWindowEnd) : undefined,
                     },
@@ -436,6 +599,16 @@ router.post('/conversations/:id/tickets', async (req, res) => {
         });
 
         emitToCompany(companyId, 'ticket:new', ticket);
+        if (ticket?.fieldService?.technicianId) {
+            await notifyFieldVisitAssigned({
+                companyId,
+                technicianId: ticket.fieldService.technicianId,
+                ticketId: ticket.id,
+                protocol: ticket.protocol,
+                title: ticket.title,
+                scheduledAt: ticket.fieldService.scheduledAt,
+            });
+        }
 
         res.status(201).json(ticket);
     } catch (error) {

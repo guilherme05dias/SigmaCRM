@@ -12,6 +12,7 @@ import { useAuth } from '../lib/auth';
 interface WhatsAppSession {
     name: string;
     status: string;
+    provider?: string;
 }
 
 interface WhatsAppHistorySyncSummary {
@@ -20,6 +21,7 @@ interface WhatsAppHistorySyncSummary {
     importedContacts: number;
     importedConversations: number;
     importedMessages: number;
+    historyRequests?: number;
 }
 
 interface WhatsAppOutboxSummary {
@@ -53,6 +55,14 @@ interface WhatsAppOutboxRetryResponse {
     failed: number;
 }
 
+interface WhatsAppGroup {
+    id: string;
+    name: string;
+    participantCount?: number | null;
+    unreadCount?: number;
+    lastMessageAt?: number | null;
+}
+
 const WHATSAPP_SESSION_ID = 'default';
 type SettingsSection = 'business-hours' | 'auto-messages' | 'whatsapp';
 type BusinessHourStatus = 'OPEN' | 'SPECIAL' | 'CLOSED';
@@ -69,6 +79,8 @@ interface SystemSettings {
     welcomeMessage?: string | null;
     awayMessage?: string | null;
     closingMessage?: string | null;
+    externalServiceGroupId?: string | null;
+    externalServiceGroupName?: string | null;
 }
 
 const defaultBusinessHours: BusinessHour[] = [
@@ -152,6 +164,9 @@ export default function Settings() {
     const [whatsAppOutboxLoading, setWhatsAppOutboxLoading] = useState(false);
     const [whatsAppOutboxRetrying, setWhatsAppOutboxRetrying] = useState(false);
     const [whatsAppOutboxError, setWhatsAppOutboxError] = useState<string | null>(null);
+    const [whatsAppGroups, setWhatsAppGroups] = useState<WhatsAppGroup[]>([]);
+    const [whatsAppGroupsLoading, setWhatsAppGroupsLoading] = useState(false);
+    const [whatsAppGroupsError, setWhatsAppGroupsError] = useState<string | null>(null);
     const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
     const [settings, setSettings] = useState<SystemSettings>(defaultSettings);
     const [settingsLoading, setSettingsLoading] = useState(true);
@@ -169,6 +184,8 @@ export default function Settings() {
                     welcomeMessage: data.welcomeMessage ?? defaultSettings.welcomeMessage,
                     awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
                     closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
+                    externalServiceGroupId: data.externalServiceGroupId ?? null,
+                    externalServiceGroupName: data.externalServiceGroupName ?? null,
                 });
             })
             .catch((err) => {
@@ -193,6 +210,8 @@ export default function Settings() {
                 welcomeMessage: data.welcomeMessage ?? defaultSettings.welcomeMessage,
                 awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
                 closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
+                externalServiceGroupId: data.externalServiceGroupId ?? null,
+                externalServiceGroupName: data.externalServiceGroupName ?? null,
             });
             showToast({ title: 'Configurações salvas', description: 'As alterações foram aplicadas ao sistema.', variant: 'success' });
         } catch (err) {
@@ -225,8 +244,9 @@ export default function Settings() {
         try {
             const data = await apiRequest<WhatsAppSession[]>('/api/whatsapp/sessions');
             setSessions(data);
-            const session = data.find((item) => item.name === WHATSAPP_SESSION_ID);
-            if (session && ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING', 'STARTING', 'AUTHENTICATED'].includes(session.status)) {
+            const session = data.find((item) => item.name === WHATSAPP_SESSION_ID) || data[0];
+            const sessionStatus = session?.status?.toUpperCase();
+            if (session && ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING', 'STARTING', 'CONNECTING', 'AUTHENTICATED'].includes(sessionStatus)) {
                 loadWhatsAppQrCode();
             }
         } catch (err) {
@@ -252,6 +272,30 @@ export default function Settings() {
         }
     };
 
+    const loadWhatsAppGroups = async () => {
+        setWhatsAppGroupsLoading(true);
+        setWhatsAppGroupsError(null);
+
+        try {
+            const data = await apiRequest<WhatsAppGroup[]>('/api/whatsapp/groups?limit=500');
+            const groups = Array.isArray(data) ? data : [];
+            setWhatsAppGroups(groups);
+            showToast({
+                title: 'Grupos carregados',
+                description: `${groups.length} grupos encontrados na sessao conectada.`,
+                variant: 'success',
+            });
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                const message = err instanceof Error ? err.message : 'Erro ao buscar grupos do WhatsApp.';
+                setWhatsAppGroupsError(message);
+                showToast({ title: 'Erro ao buscar grupos', description: message, variant: 'error' });
+            }
+        } finally {
+            setWhatsAppGroupsLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadSettings();
         loadWhatsAppSessions();
@@ -270,13 +314,15 @@ export default function Settings() {
 
     // For meta-cloud the session name is 'meta-cloud', not 'default'
     const currentWhatsAppSession = sessions.find((session) => session.name === WHATSAPP_SESSION_ID) || sessions[0] || null;
-    const isMetaCloud = currentWhatsAppSession?.name === 'meta-cloud';
-    const whatsAppStatus = currentWhatsAppSession?.status || 'NAO_INICIADO';
-    const hasQrCode = !isMetaCloud && ['QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
+    const providerName = currentWhatsAppSession?.provider || (currentWhatsAppSession?.name === 'meta-cloud' ? 'meta-cloud' : 'murilo-api');
+    const isMetaCloud = providerName === 'meta-cloud';
+    const isUazApi = providerName === 'uazapi';
+    const whatsAppStatus = (currentWhatsAppSession?.status || 'NAO_INICIADO').toUpperCase();
+    const hasQrCode = !isMetaCloud && (['QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus) || (isUazApi && whatsAppStatus === 'CONNECTING'));
     const isAuthenticated = !isMetaCloud && whatsAppStatus === 'AUTHENTICATED';
     const isStarting = !isMetaCloud && whatsAppStatus === 'STARTING';
     const isConnected = ['READY', 'CONNECTED', 'WORKING'].includes(whatsAppStatus);
-    const canDisconnect = !isMetaCloud && ['READY', 'CONNECTED', 'WORKING', 'AUTHENTICATED', 'STARTING', 'QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
+    const canDisconnect = !isMetaCloud && ['READY', 'CONNECTED', 'WORKING', 'AUTHENTICATED', 'STARTING', 'CONNECTING', 'QR', 'QR_AVAILABLE_OR_AUTH_PENDING'].includes(whatsAppStatus);
     const statusText = isMetaCloud
         ? (isConnected ? 'API ativa e configurada' : 'API não configurada')
         : isConnected
@@ -288,6 +334,8 @@ export default function Settings() {
                     : hasQrCode
                         ? 'Aguardando leitura do QR Code'
                         : 'Não conectado';
+
+    const selectedExternalGroup = whatsAppGroups.find((group) => group.id === settings.externalServiceGroupId) || null;
 
     const startWhatsAppSession = async () => {
         setWhatsAppLoading(true);
@@ -338,7 +386,7 @@ export default function Settings() {
         try {
             const summary = await apiRequest<WhatsAppHistorySyncSummary>(`/api/whatsapp/sessions/${WHATSAPP_SESSION_ID}/sync-history`, {
                 method: 'POST',
-                body: JSON.stringify({ chatLimit: 100, messageLimit: 50 }),
+                body: JSON.stringify({ chatLimit: 500, messageLimit: 1000 }),
             });
             setWhatsAppSyncSummary(summary);
             showToast({
@@ -401,7 +449,7 @@ export default function Settings() {
         <div className="relative flex flex-col w-full h-full min-h-screen overflow-x-hidden bg-background font-sans text-foreground">
             <SigmaTopbar user={user} onLogout={logout} />
 
-            <main className="flex flex-1 flex-col md:flex-row max-w-7xl mx-auto w-full p-4 md:p-8 gap-8">
+            <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-8 p-4 pb-24 md:flex-row md:p-8">
                 {/* Left Sidebar Navigation */}
                 <aside className="w-full md:w-72 flex flex-col gap-6">
                     <div className="bg-surface p-4 rounded-xl shadow-card border border-border">
@@ -451,7 +499,7 @@ export default function Settings() {
                                     type="button"
                                     onClick={saveSettings}
                                     disabled={settingsSaving || settingsLoading}
-                                    className="bg-primary text-white px-4 py-2 rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                    className="min-h-11 rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                                 >
                                     {settingsSaving ? 'Salvando...' : 'Salvar Alterações'}
                                 </button>
@@ -524,7 +572,7 @@ export default function Settings() {
                                     type="button"
                                     onClick={saveSettings}
                                     disabled={settingsSaving || settingsLoading}
-                                    className="bg-primary text-white px-4 py-2 rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                    className="min-h-11 rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                                 >
                                     {settingsSaving ? 'Salvando...' : 'Salvar Mensagens'}
                                 </button>
@@ -595,7 +643,7 @@ export default function Settings() {
                                             onClick={startWhatsAppSession}
                                             disabled={whatsAppLoading || whatsAppDisconnecting || whatsAppSyncing}
                                             aria-label={isConnected ? 'Reconectar WhatsApp' : 'Conectar WhatsApp'}
-                                            className="px-4 py-2 bg-primary text-white rounded-pill text-sm font-semibold hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                            className="min-h-11 rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                                         >
                                             {whatsAppLoading ? 'Conectando...' : isConnected ? 'Reconectar' : 'Conectar WhatsApp'}
                                         </button>
@@ -619,7 +667,7 @@ export default function Settings() {
                                             </span>
                                         </p>
                                         {!isMetaCloud && <p className="mt-1 text-xs text-muted-foreground">Sessão: {WHATSAPP_SESSION_ID}</p>}
-                                        <p className="mt-1 text-xs text-muted-foreground">Provider: {isMetaCloud ? 'meta-cloud (API oficial)' : 'murilo-api (WhatsApp Web)'}</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">Provider: {isMetaCloud ? 'meta-cloud (API oficial)' : isUazApi ? 'uazapi (WhatsApp Web)' : `${providerName} (WhatsApp Web)`}</p>
                                         {whatsAppError && (
                                             <div className="mt-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">
                                                 {whatsAppError}
@@ -685,6 +733,72 @@ export default function Settings() {
                             <div className="mt-8 rounded-xl border border-border bg-surface-alt p-5">
                                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                                     <div>
+                                        <p className="text-sm font-bold text-foreground">Grupo de avisos de atendimento externo</p>
+                                        <p className="mt-1 text-xs text-muted-foreground">Busque os grupos da sessao conectada e selecione onde os avisos de visita serao enviados.</p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={loadWhatsAppGroups}
+                                        disabled={whatsAppGroupsLoading || !isUazApi}
+                                        aria-label="Buscar grupos do WhatsApp"
+                                        className="min-h-11 rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                        {whatsAppGroupsLoading ? 'Buscando...' : 'Buscar grupos'}
+                                    </button>
+                                </div>
+
+                                {whatsAppGroupsError && (
+                                    <div className="mt-4 rounded-lg border border-danger/20 bg-danger-soft p-3 text-sm text-danger-fg">
+                                        {whatsAppGroupsError}
+                                    </div>
+                                )}
+
+                                <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]">
+                                    <label>
+                                        <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Grupo selecionado</span>
+                                        <select
+                                            value={settings.externalServiceGroupId || ''}
+                                            onChange={(event) => {
+                                                const group = whatsAppGroups.find((item) => item.id === event.target.value);
+                                                setSettings((current) => ({
+                                                    ...current,
+                                                    externalServiceGroupId: group?.id || null,
+                                                    externalServiceGroupName: group?.name || null,
+                                                }));
+                                            }}
+                                            disabled={settingsLoading || settingsSaving || whatsAppGroupsLoading}
+                                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
+                                        >
+                                            <option value="">Nenhum grupo selecionado</option>
+                                            {settings.externalServiceGroupId && !selectedExternalGroup && (
+                                                <option value={settings.externalServiceGroupId}>
+                                                    {settings.externalServiceGroupName || settings.externalServiceGroupId}
+                                                </option>
+                                            )}
+                                            {whatsAppGroups.map((group) => (
+                                                <option key={group.id} value={group.id}>
+                                                    {group.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <p className="mt-2 text-xs text-muted-foreground">Depois de escolher, clique em Salvar configuracoes.</p>
+                                    </label>
+
+                                    <div className="rounded-lg border border-border bg-surface p-4">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">ID do grupo</p>
+                                        <p className="mt-2 break-all font-mono text-xs text-foreground">
+                                            {settings.externalServiceGroupId || 'Nao definido'}
+                                        </p>
+                                        {settings.externalServiceGroupName && (
+                                            <p className="mt-2 text-sm font-semibold text-foreground">{settings.externalServiceGroupName}</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-8 rounded-xl border border-border bg-surface-alt p-5">
+                                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                    <div>
                                         <p className="text-sm font-bold text-foreground">Fila de envio WhatsApp</p>
                                         <p className="mt-1 text-xs text-muted-foreground">Monitore mensagens pendentes ou com falha e reenvie quando o provider voltar.</p>
                                     </div>
@@ -703,7 +817,7 @@ export default function Settings() {
                                             onClick={retryWhatsAppOutbox}
                                             disabled={whatsAppOutboxRetrying || whatsAppOutboxLoading || !whatsAppOutbox?.summary.failed}
                                             aria-label="Reenviar mensagens com falha do WhatsApp"
-                                            className="rounded-pill bg-primary px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                            className="min-h-11 rounded-lg bg-primary-solid px-4 py-2 text-sm font-semibold text-primary-solid-fg transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-60"
                                         >
                                             {whatsAppOutboxRetrying ? 'Reenviando...' : 'Reenviar falhas'}
                                         </button>
@@ -803,7 +917,7 @@ export default function Settings() {
                             type="button"
                             onClick={saveSettings}
                             disabled={settingsLoading || settingsSaving}
-                            className="bg-primary text-white px-8 py-2.5 rounded-pill text-sm font-bold shadow-primary-glow hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60 transition-colors cursor-pointer"
+                                    className="min-h-11 rounded-lg bg-primary-solid px-8 py-2.5 text-sm font-bold text-primary-solid-fg shadow-none transition-colors hover:bg-primary-solid-hover disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                         >
                             {settingsSaving ? 'Salvando...' : 'Salvar Todas as Configurações'}
                         </button>

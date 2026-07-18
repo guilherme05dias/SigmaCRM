@@ -33,12 +33,14 @@ async function clear() {
   // Ordem respeitando FKs
   await prisma.ticketTimeline.deleteMany();
   await prisma.ticketEvaluation.deleteMany();
+  await prisma.fieldVisitScheduleChange.deleteMany();
   await prisma.ticketFieldService.deleteMany();
   await prisma.message.deleteMany();
   await prisma.ticket.deleteMany();
   await prisma.conversation.deleteMany();
   await prisma.contact.deleteMany();
   await prisma.customer.deleteMany();
+  await prisma.serviceTopic.deleteMany();
   await prisma.counter.deleteMany();
   await prisma.whatsAppOutbox.deleteMany();
   await prisma.whatsAppInboundEvent.deleteMany();
@@ -85,23 +87,23 @@ async function main() {
   });
   await setMessageSignature(aSupervisor.id, 'Marina Supervisora | Suporte tecnico');
   const aAgent = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Ana Suporte', email: 'ana@dragonbyte.com', passwordHash: devPasswordHash, role: 'AGENT', departmentId: aSupport.id },
+    data: { companyId: companyA.id, name: 'Ana Suporte', email: 'ana@dragonbyte.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id },
   });
   await setMessageSignature(aAgent.id, 'Ana Suporte | Suporte tecnico');
   const aRafael = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Rafael Atendimento', email: 'rafael@dragonbyte.com', passwordHash: devPasswordHash, role: 'AGENT', departmentId: aSupport.id },
+    data: { companyId: companyA.id, name: 'Rafael Atendimento', email: 'rafael@dragonbyte.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id },
   });
   await setMessageSignature(aRafael.id, 'Rafael Atendimento | Suporte tecnico');
   const aTech = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Carlos Técnico', email: 'carlos@dragonbyte.com', passwordHash: devPasswordHash, role: 'AGENT', specialty: 'Redes e Cabeamento', departmentId: aN2.id },
+    data: { companyId: companyA.id, name: 'Carlos Técnico', email: 'carlos@dragonbyte.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Redes e Cabeamento', departmentId: aN2.id },
   });
   await setMessageSignature(aTech.id, 'Carlos Tecnico | Suporte tecnico');
   const aJulia = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Julia Infra', email: 'julia@dragonbyte.com', passwordHash: devPasswordHash, role: 'AGENT', specialty: 'Servidores Linux', departmentId: aN2.id },
+    data: { companyId: companyA.id, name: 'Julia Infra', email: 'julia@dragonbyte.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Servidores Linux', departmentId: aN2.id },
   });
   await setMessageSignature(aJulia.id, 'Julia Infra | Suporte tecnico');
   await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Usuario Inativo', email: 'inativo@dragonbyte.com', passwordHash: devPasswordHash, role: 'AGENT', departmentId: aSupport.id, active: false },
+    data: { companyId: companyA.id, name: 'Usuario Inativo', email: 'inativo@dragonbyte.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id, active: false },
   });
 
   const aCustomer = await prisma.customer.create({
@@ -180,13 +182,13 @@ async function main() {
     data: { companyId: companyB.id, name: 'Pedro Supervisor', email: 'supervisor@acme.com', passwordHash: devPasswordHash, role: 'SUPERVISOR', departmentId: bDept.id },
   });
   await prisma.user.create({
-    data: { companyId: companyB.id, name: 'Lia Atendimento', email: 'lia@acme.com', passwordHash: devPasswordHash, role: 'AGENT', departmentId: bDept.id },
+    data: { companyId: companyB.id, name: 'Lia Atendimento', email: 'lia@acme.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: bDept.id },
   });
   await prisma.user.create({
-    data: { companyId: companyB.id, name: 'Mauro Técnico', email: 'mauro@acme.com', passwordHash: devPasswordHash, role: 'AGENT', specialty: 'Instalação e manutenção', departmentId: bField.id },
+    data: { companyId: companyB.id, name: 'Mauro Técnico', email: 'mauro@acme.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Instalação e manutenção', departmentId: bField.id },
   });
   await prisma.user.create({
-    data: { companyId: companyB.id, name: 'Conta Inativa', email: 'inativo@acme.com', passwordHash: devPasswordHash, role: 'AGENT', departmentId: bDept.id, active: false },
+    data: { companyId: companyB.id, name: 'Conta Inativa', email: 'inativo@acme.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: bDept.id, active: false },
   });
   const bCustomer = await prisma.customer.create({
     data: { companyId: companyB.id, name: 'Mercado Central', segment: 'Varejo', city: 'Campinas', status: 'ATIVO' },

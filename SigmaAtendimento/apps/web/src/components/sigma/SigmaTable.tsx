@@ -12,8 +12,8 @@ interface SigmaTableProps {
 
 export function SigmaTable({ columns, children }: SigmaTableProps) {
     return (
-        <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-card">
-            <div className="overflow-x-auto">
+        <div className="overflow-hidden rounded-xl border border-border bg-surface">
+            <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Tabela com rolagem horizontal">
                 <table className="w-full text-left border-collapse">
                     <thead>
                         <tr className="border-b border-border bg-surface-alt">

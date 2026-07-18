@@ -148,7 +148,7 @@ export default function Departments() {
         <div className="flex flex-col min-h-screen bg-background text-foreground font-sans">
             <SigmaTopbar user={user} onLogout={logout} />
 
-            <main className="flex-1 max-w-[1440px] mx-auto w-full p-6 lg:p-10">
+            <main className="mx-auto w-full max-w-[1440px] flex-1 p-4 pb-24 sm:p-6 sm:pb-24 md:pb-6 lg:p-10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-3xl font-extrabold tracking-tight text-foreground">Gestão de Departamentos</h1>
@@ -242,7 +242,7 @@ export default function Departments() {
                                         <button
                                             type="button"
                                             onClick={() => editDepartment(department)}
-                                            className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all cursor-pointer"
+                                            className="flex size-11 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                                             title="Editar"
                                             aria-label={`Editar departamento ${department.name}`}
                                         >
@@ -252,7 +252,7 @@ export default function Departments() {
                                             type="button"
                                             onClick={() => deactivateDepartment(department)}
                                             disabled={!department.active}
-                                            className="p-2 text-muted-foreground hover:text-danger hover:bg-danger-soft rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                                            className="flex size-11 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
                                             title="Inativar"
                                             aria-label={`Inativar departamento ${department.name}`}
                                         >

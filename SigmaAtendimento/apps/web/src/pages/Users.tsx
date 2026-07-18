@@ -11,7 +11,7 @@ import { useToast } from '../components/ui/Toast';
 import { apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
 
-type Role = 'ADMIN' | 'SUPERVISOR' | 'AGENT';
+type Role = 'ADMIN' | 'SUPERVISOR' | 'ATTENDANT' | 'TECHNICIAN';
 
 interface DepartmentItem {
     id: string;
@@ -44,7 +44,7 @@ const initialForm: UserFormState = {
     name: '',
     email: '',
     password: '',
-    role: 'AGENT',
+    role: 'ATTENDANT',
     messageSignature: '',
     departmentId: '',
     active: true,
@@ -184,7 +184,7 @@ export default function Users() {
         <div className="flex flex-col min-h-screen bg-background text-foreground font-sans">
             <SigmaTopbar user={user} onLogout={logout} />
 
-            <main className="flex-1 max-w-[1440px] mx-auto w-full p-6 lg:p-10">
+            <main className="mx-auto w-full max-w-[1440px] flex-1 p-4 pb-24 sm:p-6 sm:pb-24 md:pb-6 lg:p-10">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-3xl font-extrabold tracking-tight text-foreground">Gerenciamento de Usuários</h1>
@@ -230,7 +230,8 @@ export default function Users() {
                                 <option value="">Todos</option>
                                 <option value="ADMIN">ADMIN</option>
                                 <option value="SUPERVISOR">SUPERVISOR</option>
-                                <option value="AGENT">AGENT</option>
+                                <option value="ATTENDANT">Atendente</option>
+                                <option value="TECHNICIAN">Técnico</option>
                             </select>
                         </label>
                     </div>
@@ -290,7 +291,7 @@ export default function Users() {
                                         <button
                                             type="button"
                                             onClick={() => editUser(user)}
-                                            className="p-2 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-all cursor-pointer"
+                                            className="flex size-11 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                                             title="Editar"
                                             aria-label={`Editar usuário ${user.name}`}
                                         >
@@ -300,7 +301,7 @@ export default function Users() {
                                             type="button"
                                             onClick={() => deactivateUser(user)}
                                             disabled={!user.active}
-                                            className="p-2 text-muted-foreground hover:text-danger hover:bg-danger-soft rounded-lg transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                                            className="flex size-11 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:opacity-40"
                                             title="Inativar"
                                             aria-label={`Inativar usuário ${user.name}`}
                                         >
@@ -345,7 +346,8 @@ export default function Users() {
                                 <select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value as Role })} className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30">
                                     <option value="ADMIN">ADMIN</option>
                                     <option value="SUPERVISOR">SUPERVISOR</option>
-                                    <option value="AGENT">AGENT</option>
+                                    <option value="ATTENDANT">Atendente</option>
+                                    <option value="TECHNICIAN">Técnico</option>
                                 </select>
                             </label>
                             <label className="block">

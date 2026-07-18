@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const RoleEnum = z.enum(["ADMIN", "SUPERVISOR", "AGENT"]);
+export const RoleEnum = z.enum(["ADMIN", "SUPERVISOR", "ATTENDANT", "TECHNICIAN"]);
 export type Role = z.infer<typeof RoleEnum>;
 
 // User
@@ -36,6 +36,21 @@ export type Department = z.infer<typeof DepartmentSchema>;
 
 export const CreateDepartmentSchema = DepartmentSchema.omit({ id: true, created_at: true, updated_at: true, company_id: true });
 export type CreateDepartmentDTO = z.infer<typeof CreateDepartmentSchema>;
+
+// Service topics / systems
+export const ServiceTopicSchema = z.object({
+    id: z.string().uuid(),
+    companyId: z.string().uuid(),
+    name: z.string().min(2),
+    description: z.string().optional().nullable(),
+    active: z.boolean(),
+    createdAt: z.date().optional(),
+    updatedAt: z.date().optional(),
+});
+export type ServiceTopic = z.infer<typeof ServiceTopicSchema>;
+
+export const CreateServiceTopicSchema = ServiceTopicSchema.omit({ id: true, createdAt: true, updatedAt: true, companyId: true });
+export type CreateServiceTopicDTO = z.infer<typeof CreateServiceTopicSchema>;
 
 // Login Auth
 export const LoginSchema = z.object({

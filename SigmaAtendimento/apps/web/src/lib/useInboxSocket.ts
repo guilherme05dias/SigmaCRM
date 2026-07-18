@@ -1,15 +1,15 @@
 /// <reference types="vite/client" />
 import { useEffect, useState, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
+import type { Socket } from 'socket.io-client';
 import type { Conversation, Message } from '../components/inbox/types';
-
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3334';
+import { acquireSharedSocket, releaseSharedSocket } from './socket';
 
 export function useInboxSocket(
     token: string | null,
     currentConversationId: string | null,
     onConversationUpdated: (updatedConv: any) => void,
     onMessageNew: (newMessage: any) => void,
+    onMessageUpdated: (updatedMessage: Partial<Message> & { id: string }) => void,
     onConversationNew?: (newConv: any) => void,
     /** Chamado em reconexões (NÃO na conexão inicial) para recarregar dados. */
     onReconnect?: () => void
@@ -17,18 +17,17 @@ export function useInboxSocket(
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
 
-    const callbacksRef = useRef({ onConversationUpdated, onMessageNew, onConversationNew, onReconnect });
+    const callbacksRef = useRef({ onConversationUpdated, onMessageNew, onMessageUpdated, onConversationNew, onReconnect });
 
     useEffect(() => {
-        callbacksRef.current = { onConversationUpdated, onMessageNew, onConversationNew, onReconnect };
+        callbacksRef.current = { onConversationUpdated, onMessageNew, onMessageUpdated, onConversationNew, onReconnect };
     });
 
     useEffect(() => {
         if (!token) return;
 
-        const newSocket = io(SOCKET_URL, {
-            auth: { token }
-        });
+        const newSocket = acquireSharedSocket(token);
+        if (!newSocket) return;
 
         // isFirstConnect é local a esta instância de socket — a primeira conexão
         // é a inicial; todas as seguintes são reconexões (socket.io reconecta auto).
@@ -52,6 +51,10 @@ export function useInboxSocket(
             callbacksRef.current.onMessageNew(msg);
         });
 
+        newSocket.on('message:updated', (msg) => {
+            callbacksRef.current.onMessageUpdated(msg);
+        });
+
         newSocket.on('conversation:new', (conv) => {
             if (callbacksRef.current.onConversationNew) {
                 callbacksRef.current.onConversationNew(conv);
@@ -63,7 +66,13 @@ export function useInboxSocket(
         setSocket(newSocket);
 
         return () => {
-            newSocket.disconnect();
+            newSocket.off('connect');
+            newSocket.off('disconnect');
+            newSocket.off('conversation:updated');
+            newSocket.off('message:new');
+            newSocket.off('message:updated');
+            newSocket.off('conversation:new');
+            releaseSharedSocket(newSocket);
         };
     }, [token]);
 

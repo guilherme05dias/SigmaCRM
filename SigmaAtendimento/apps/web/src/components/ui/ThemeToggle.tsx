@@ -9,7 +9,7 @@ export function ThemeToggle() {
         <button
             type="button"
             onClick={toggleTheme}
-            className="p-2 text-muted-foreground hover:bg-surface-alt hover:text-foreground rounded-xl transition-colors"
+            className="flex size-11 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-surface-alt hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             title={nextThemeLabel}
             aria-label={nextThemeLabel}
         >

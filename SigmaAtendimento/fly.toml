@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────
+# Fly.io — SigmaCRM API
+# Deploy a partir de SigmaAtendimento/:  fly deploy
+# O nome do app deve ser único globalmente; `fly launch` ajusta se preciso.
+# ─────────────────────────────────────────────────────────────
+app = "sigmacrm-api"
+primary_region = "gru"        # São Paulo (menor latência p/ Brasil)
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Variáveis NÃO-secretas. Segredos vão por `fly secrets set` (ver guia).
+[env]
+  PORT = "8080"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Mantém a máquina SEMPRE ligada — essencial para receber webhooks da Meta
+  # sem cold start. Não desligar automaticamente.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+# Health check no endpoint que a API já expõe
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "20s"
+  method = "GET"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"            # Node + Prisma: 256mb arrisca OOM

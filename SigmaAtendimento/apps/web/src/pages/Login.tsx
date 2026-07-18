@@ -39,11 +39,11 @@ export default function Login() {
     };
 
     return (
-        <div className="bg-surface-alt min-h-screen flex items-center justify-center p-4">
-            <div className="w-full max-w-md bg-surface border border-border p-10 rounded-3xl shadow-lifted relative z-10">
+        <div className="flex min-h-dvh flex-col bg-surface-alt p-4">
+            <div className="relative z-10 my-auto w-full max-w-md self-center rounded-2xl border border-border bg-surface p-6 shadow-card sm:p-10">
                 <div className="flex flex-col items-center mb-8">
-                    <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center mb-5 shadow-primary-glow">
-                        <Icon name="hub" className="size-9 text-white" />
+                    <div className="mb-5 flex size-16 items-center justify-center rounded-2xl border-2 border-primary-solid bg-transparent text-primary shadow-none">
+                        <Icon name="hub" className="size-9 text-primary" />
                     </div>
                     <h1 className="font-display text-[28px] font-normal text-foreground tracking-wide">
                         Sigma <span className="text-primary font-medium">Atendimento</span>
@@ -52,13 +52,13 @@ export default function Login() {
                 </div>
 
                 {error && (
-                    <div className="bg-danger-soft border border-danger/20 text-danger-fg p-3 rounded-xl mb-6 text-sm font-sans flex items-center gap-2">
+                    <div role="alert" className="bg-danger-soft border border-danger/20 text-danger-fg p-3 rounded-xl mb-6 text-sm font-sans flex items-center gap-2">
                         <Icon name="error" className="size-5" />
                         {error}
                     </div>
                 )}
                 {notice && (
-                    <div className="bg-primary/10 border border-primary/20 text-primary p-3 rounded-xl mb-6 text-sm font-sans flex items-center gap-2">
+                    <div role="status" className="bg-primary/10 border border-primary/20 text-primary p-3 rounded-xl mb-6 text-sm font-sans flex items-center gap-2">
                         <Icon name="info" className="size-5" />
                         {notice}
                     </div>
@@ -66,14 +66,15 @@ export default function Login() {
 
                 <form onSubmit={handleLogin} className="space-y-4">
                     <div className="space-y-1.5">
-                        <label className="block text-sm font-medium text-foreground tracking-wide">E-mail</label>
+                        <label htmlFor="login-email" className="block text-sm font-medium text-foreground tracking-wide">E-mail</label>
                         <div className="relative">
                             <Icon name="mail" className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground size-[18px]" />
                             <input
+                                id="login-email"
                                 type="email"
                                 value={email}
                                 onChange={e => setEmail(e.target.value)}
-                                className="w-full pl-11 pr-4 py-3 bg-surface border border-border rounded-xl text-[15px] text-foreground tracking-wide focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/70"
+                                className="w-full rounded-xl border border-border bg-surface py-3 pl-11 pr-4 text-[15px] tracking-wide text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
                                 placeholder="seu@email.com"
                                 required
                             />
@@ -82,11 +83,11 @@ export default function Login() {
 
                     <div className="space-y-1.5">
                         <div className="flex justify-between items-center">
-                            <label className="text-sm font-medium text-foreground tracking-wide">Senha</label>
+                            <label htmlFor="login-password" className="text-sm font-medium text-foreground tracking-wide">Senha</label>
                             <button
                                 type="button"
                                 onClick={() => showAccessNotice('Recuperação de senha ainda é feita pelo administrador do sistema. Solicite a redefinição para um usuário ADMIN.')}
-                                className="text-xs font-medium text-primary hover:underline transition-all tracking-wide"
+                                className="inline-flex min-h-11 items-center text-sm font-medium text-primary transition-colors hover:underline tracking-wide"
                             >
                                 Esqueci minha senha
                             </button>
@@ -94,18 +95,20 @@ export default function Login() {
                         <div className="relative">
                             <Icon name="lock" className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground size-[18px]" />
                             <input
+                                id="login-password"
                                 type={showPassword ? 'text' : 'password'}
                                 value={password}
                                 onChange={e => setPassword(e.target.value)}
-                                className="w-full pl-11 pr-12 py-3 bg-surface border border-border rounded-xl text-[15px] text-foreground tracking-wide focus:ring-2 focus:ring-primary/30 focus:border-primary outline-none transition-all placeholder:text-muted-foreground/70"
+                                className="w-full rounded-xl border border-border bg-surface py-3 pl-11 pr-12 text-[15px] tracking-wide text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
                                 placeholder="••••••••"
                                 required
                             />
                             <button
                                 type="button"
                                 onClick={() => setShowPassword((current) => !current)}
-                                className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+                                className="absolute right-1 top-1/2 flex size-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-surface-alt hover:text-primary"
                                 title={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
                             >
                                 <Icon name="visibility" className="size-[18px]" />
                             </button>
@@ -127,7 +130,7 @@ export default function Login() {
 
                     <button
                         type="submit"
-                        className="w-full bg-primary hover:bg-primary-700 text-white font-medium text-[15px] tracking-wide py-3.5 rounded-xl shadow-primary-glow transition-colors mt-2 flex items-center justify-center gap-2 cursor-pointer active:scale-[0.98]"
+                        className="mt-2 flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-primary-solid px-5 py-3 font-medium text-primary-solid-fg shadow-none transition-colors hover:bg-primary-solid-hover active:scale-[0.98]"
                     >
                         Entrar
                         <Icon name="login" className="size-[18px]" />
@@ -140,7 +143,7 @@ export default function Login() {
                         <button
                             type="button"
                             onClick={() => showAccessNotice('Solicite acesso a um administrador. O cadastro de novos usuários é feito em Usuários > Novo usuário.')}
-                            className="text-primary font-medium hover:underline"
+                            className="inline-flex min-h-11 items-center font-medium text-primary hover:underline"
                         >
                             Solicite acesso
                         </button>
@@ -148,12 +151,12 @@ export default function Login() {
                 </div>
             </div>
 
-            <div className="fixed bottom-6 text-muted-foreground text-xs flex items-center gap-4">
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs text-muted-foreground sm:gap-x-4">
                 <span>© 2024 Sigma Sistemas</span>
-                <span className="w-1 h-1 bg-border rounded-full"></span>
-                <Link to="/politica-de-privacidade" className="hover:text-primary transition-colors">Privacidade</Link>
-                <span className="w-1 h-1 bg-border rounded-full"></span>
-                <Link to="/termos-de-servico" className="hover:text-primary transition-colors">Termos de Serviço</Link>
+                <span className="size-1 rounded-full bg-border" aria-hidden="true" />
+                <Link to="/politica-de-privacidade" className="inline-flex min-h-11 items-center transition-colors hover:text-primary">Privacidade</Link>
+                <span className="size-1 rounded-full bg-border" aria-hidden="true" />
+                <Link to="/termos-de-servico" className="inline-flex min-h-11 items-center transition-colors hover:text-primary">Termos de Serviço</Link>
             </div>
         </div>
     );
