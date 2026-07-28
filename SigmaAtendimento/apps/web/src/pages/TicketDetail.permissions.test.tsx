@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/ui/Toast';
@@ -95,5 +95,43 @@ describe('edição do chamado pelo técnico atribuído', () => {
         expect(screen.queryByLabelText('Prioridade')).toBeNull();
         expect(screen.queryByLabelText('Técnico')).toBeNull();
         expect(screen.getByRole('button', { name: 'Salvar chamado' })).not.toBeDisabled();
+    });
+
+    it('abre uma mensagem padrão no WhatsApp do próprio técnico', async () => {
+        const windowOpen = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+        render(
+            <MemoryRouter initialEntries={['/tickets/ticket-1']}>
+                <ToastProvider>
+                    <Routes>
+                        <Route path="/tickets/:id" element={<TicketDetail />} />
+                    </Routes>
+                </ToastProvider>
+            </MemoryRouter>,
+        );
+
+        const contactButton = await screen.findByRole('button', { name: 'Chamar no WhatsApp' });
+        fireEvent.click(contactButton);
+
+        expect(screen.getByRole('dialog', { name: 'Chamar pelo seu WhatsApp' })).toBeTruthy();
+        expect(screen.getByText('Telefone cadastrado')).toBeTruthy();
+        expect(screen.getByText('5549999999999')).toBeTruthy();
+        const message = screen.getByLabelText('Mensagem');
+        expect((message as HTMLTextAreaElement).value).toContain('Aqui é Lucas, da Sigma Sistemas.');
+        expect((message as HTMLTextAreaElement).value).toContain('chamado SIG-001');
+
+        fireEvent.change(message, { target: { value: 'Olá! Pode me enviar uma foto do equipamento?' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Abrir meu WhatsApp' }));
+
+        expect(windowOpen).toHaveBeenCalledWith(
+            'https://wa.me/5549999999999?text=Ol%C3%A1!%20Pode%20me%20enviar%20uma%20foto%20do%20equipamento%3F',
+            '_blank',
+            'noopener,noreferrer',
+        );
+        expect(apiRequest).not.toHaveBeenCalledWith(
+            '/api/tickets/ticket-1/contact-customer',
+            expect.anything(),
+        );
+        windowOpen.mockRestore();
     });
 });

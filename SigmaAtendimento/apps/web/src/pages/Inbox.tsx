@@ -108,6 +108,18 @@ function deduplicateConversationsByContact(list: Conversation[]): Conversation[]
     return sortConversationsByActivity(Array.from(preferredByContact.values()));
 }
 
+function mergeRefreshedMessages(current: Message[], refreshed: Message[]): Message[] {
+    const messagesById = new Map(current.map((message) => [message.id, message]));
+    for (const message of refreshed) {
+        messagesById.set(message.id, { ...messagesById.get(message.id), ...message });
+    }
+
+    return Array.from(messagesById.values()).sort((first, second) => {
+        const diff = new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime();
+        return diff !== 0 ? diff : first.id.localeCompare(second.id);
+    });
+}
+
 function isInboxActivelyViewed() {
     return document.visibilityState === 'visible' && document.hasFocus();
 }
@@ -146,11 +158,22 @@ export default function Inbox() {
     const conversationsRef = useRef<Conversation[]>([]);
     const isRefreshingRef = useRef(false);
     const serviceTopicsRequestIdRef = useRef(0);
+    const latestConversationsRequestIdRef = useRef(0);
+    const messagesConversationGenerationRef = useRef(0);
+    const latestMessagesRefreshRequestIdRef = useRef(0);
     const loadConversationsRef = useRef<((options?: { silent?: boolean }) => void) | null>(null);
     const loadMessagesRef = useRef<((id: string, options?: { cursor?: string | null; prepend?: boolean; silent?: boolean }) => void) | null>(null);
 
     const token = getAuthToken();
     conversationsRef.current = conversations;
+
+    const selectConversation = (conversationId: string | null) => {
+        if (selectedConvIdRef.current === conversationId) return;
+        selectedConvIdRef.current = conversationId;
+        messagesConversationGenerationRef.current += 1;
+        latestMessagesRefreshRequestIdRef.current += 1;
+        setSelectedConvId(conversationId);
+    };
 
     const markConversationRead = (conversationId: string, force = false) => {
         if (!isInboxActivelyViewed()) return;
@@ -193,21 +216,27 @@ export default function Inbox() {
 
     const loadConversations = (options: { silent?: boolean } = {}) => {
         if (!options.silent) setIsLoadingConversations(true);
+        const requestId = ++latestConversationsRequestIdRef.current;
         const scopeQuery = isManager ? `?scope=${managementScope}` : '';
         apiRequest<Conversation[]>(`/api/conversations${scopeQuery}`)
             .then(data => {
+                if (requestId !== latestConversationsRequestIdRef.current) return;
                 if (Array.isArray(data)) {
                     setConversations(data);
                     const selectedId = selectedConvIdRef.current;
                     if (selectedId && !data.some((conversation) => conversation.id === selectedId)) {
-                        setSelectedConvId(null);
+                        selectConversation(null);
                     }
                 }
                 setLastSyncedAt(new Date());
             })
-            .catch(handleApiError)
+            .catch((error) => {
+                if (requestId === latestConversationsRequestIdRef.current) handleApiError(error);
+            })
             .finally(() => {
-                if (!options.silent) setIsLoadingConversations(false);
+                if (requestId === latestConversationsRequestIdRef.current) {
+                    setIsLoadingConversations(false);
+                }
             });
     };
     loadConversationsRef.current = loadConversations;
@@ -265,15 +294,28 @@ export default function Inbox() {
 
     const loadMessages = (id: string, options: { cursor?: string | null; prepend?: boolean; silent?: boolean } = {}) => {
         if (!options.silent) setIsLoadingMessages(true);
+        const conversationGeneration = messagesConversationGenerationRef.current;
+        const refreshRequestId = options.prepend
+            ? null
+            : ++latestMessagesRefreshRequestIdRef.current;
         const params = new URLSearchParams({ take: '50' });
         if (options.cursor) params.set('cursor', options.cursor);
 
         apiRequest<{ data: Message[]; meta?: { hasMore?: boolean; nextCursor?: string | null } }>(`/api/conversations/${id}/messages?${params.toString()}`)
             .then(data => {
+                const isCurrentConversation = (
+                    selectedConvIdRef.current === id
+                    && messagesConversationGenerationRef.current === conversationGeneration
+                );
+                const isLatestRefresh = options.prepend
+                    || refreshRequestId === latestMessagesRefreshRequestIdRef.current;
+                if (!isCurrentConversation || !isLatestRefresh) return;
                 if (!data) return;
                 const fetched = Array.isArray(data.data) ? data.data : [];
                 setMessages((prev) => {
-                    if (!options.prepend) return fetched;
+                    if (!options.prepend) {
+                        return prev.length > 0 ? mergeRefreshedMessages(prev, fetched) : fetched;
+                    }
                     const existingIds = new Set(prev.map((message) => message.id));
                     const older = fetched.filter((message) => !existingIds.has(message.id));
                     return [...older, ...prev];
@@ -282,9 +324,23 @@ export default function Inbox() {
                 setMessageCursor(data.meta?.nextCursor ?? null);
                 setLastSyncedAt(new Date());
             })
-            .catch(handleApiError)
+            .catch((error) => {
+                const isCurrentConversation = (
+                    selectedConvIdRef.current === id
+                    && messagesConversationGenerationRef.current === conversationGeneration
+                );
+                const isLatestRefresh = options.prepend
+                    || refreshRequestId === latestMessagesRefreshRequestIdRef.current;
+                if (isCurrentConversation && isLatestRefresh) handleApiError(error);
+            })
             .finally(() => {
-                if (!options.silent) setIsLoadingMessages(false);
+                const isCurrentConversation = (
+                    selectedConvIdRef.current === id
+                    && messagesConversationGenerationRef.current === conversationGeneration
+                );
+                const isLatestRefresh = options.prepend
+                    || refreshRequestId === latestMessagesRefreshRequestIdRef.current;
+                if (isCurrentConversation && isLatestRefresh) setIsLoadingMessages(false);
             });
     };
     loadMessagesRef.current = loadMessages;
@@ -378,7 +434,7 @@ export default function Inbox() {
         // message:new
         (newMessage: Message) => {
             setLastSyncedAt(new Date());
-            if (newMessage.conversationId === selectedConvId) {
+            if (newMessage.conversationId === selectedConvIdRef.current) {
                 setMessages(prev => {
                     if (prev.find(m => m.id === newMessage.id)) return prev;
                     return [...prev, newMessage];
@@ -418,7 +474,7 @@ export default function Inbox() {
     );
 
     const handleSelectConversation = (id: string) => {
-        setSelectedConvId(id);
+        selectConversation(id);
         markConversationRead(id);
     };
 
@@ -440,7 +496,7 @@ export default function Inbox() {
 
                 return sortConversationsByActivity(nextList);
             });
-            setSelectedConvId(result.conversation.id);
+            selectConversation(result.conversation.id);
             setActiveTab(result.conversation.status === 'OPEN' ? 'fila' : 'chats');
             loadMessages(result.conversation.id);
             showToast({
@@ -668,7 +724,7 @@ export default function Inbox() {
                     conversation.id === closedConversation.id ? { ...conversation, ...closedConversation } : conversation
                 ));
             });
-            setSelectedConvId(null);
+            selectConversation(null);
             showToast({
                 title: 'Conversa encerrada',
                 description: payload.closureMode === 'WITH_RATING'
@@ -741,17 +797,6 @@ export default function Inbox() {
                 ? safeConversations.filter((conversation) => conversation.status === 'CLOSED')
                 : latestConversationPerContact;
 
-    useEffect(() => {
-        if (!selectedConvId) return;
-        const selected = safeConversations.find((conversation) => conversation.id === selectedConvId);
-        if (!selected || selected.status === 'CLOSED') return;
-
-        const preferred = activeConversations.find((conversation) => conversation.contactId === selected.contactId);
-        if (preferred && preferred.id !== selected.id) {
-            setSelectedConvId(preferred.id);
-        }
-    }, [conversations, selectedConvId]);
-
     // Não renderiza conteúdo enquanto redireciona
     if (unauthorized) return null;
 
@@ -779,7 +824,7 @@ export default function Inbox() {
                     managementScope={managementScope}
                     onManagementScopeChange={(scope) => {
                         setManagementScope(scope);
-                        setSelectedConvId(null);
+                        selectConversation(null);
                     }}
                 />
             </Suspense>
@@ -800,7 +845,7 @@ export default function Inbox() {
                     onTransfer={handleTransfer}
                     onCloseConversation={handleCloseConversation}
                     onCreateTicket={handleCreateTicket}
-                    onBack={() => setSelectedConvId(null)}
+                    onBack={() => selectConversation(null)}
                     isClosingConversation={isClosingConversation}
                     isCreatingTicket={isCreatingTicket}
                     createTicketError={createTicketError}

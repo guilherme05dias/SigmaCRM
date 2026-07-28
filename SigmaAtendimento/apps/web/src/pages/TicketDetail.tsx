@@ -4,6 +4,7 @@ import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { PriorityBadge, StatusBadge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
+import { Icon } from '../components/ui/Icon';
 import { Skeleton } from '../components/ui/Skeleton';
 import { useToast } from '../components/ui/Toast';
 import { useDialogFocus } from '../hooks/useDialogFocus';
@@ -129,6 +130,33 @@ const statusLabels: Record<TicketStatus, string> = {
     CLOSED: 'Fechado',
     CANCELED: 'Cancelado',
 };
+
+const contactFirstName = (value?: string | null) => {
+    const name = value?.trim();
+    if (!name || /^\+?[\d\s()-]+$/.test(name)) return null;
+    return name.split(/\s+/)[0];
+};
+
+export function buildDefaultCustomerMessage(
+    ticket: Pick<TicketDetailData, 'protocol' | 'title' | 'contact'>,
+    senderName?: string | null,
+) {
+    const firstName = contactFirstName(ticket.contact.name);
+    const greeting = firstName ? `Olá, ${firstName}! Tudo bem?` : 'Olá! Tudo bem?';
+    const sender = senderName?.trim() || 'equipe técnica';
+    const reference = ticket.protocol ? `chamado ${ticket.protocol}` : `chamado “${ticket.title}”`;
+    return `${greeting}\n\nAqui é ${sender}, da Sigma Sistemas. Estou entrando em contato sobre o ${reference}. Preciso de algumas informações para dar continuidade ao atendimento.\n\nVocê pode me responder por aqui, por favor?`;
+}
+
+export function buildTechnicianWhatsAppUrl(phone: string, message: string) {
+    const phoneDigits = phone.replace(/\D/g, '').replace(/^0+/, '');
+    const internationalPhone = phoneDigits.startsWith('55') || ![10, 11].includes(phoneDigits.length)
+        ? phoneDigits
+        : `55${phoneDigits}`;
+
+    if (internationalPhone.length < 10) return null;
+    return `https://wa.me/${internationalPhone}?text=${encodeURIComponent(message.trim())}`;
+}
 
 const transitionMap: Record<TicketStatus, TicketStatus[]> = {
     NEW: ['QUEUED', 'IN_PROGRESS', 'CANCELED'],
@@ -322,6 +350,85 @@ function CustomerEditModal({
     );
 }
 
+function CustomerWhatsAppDialog({
+    open,
+    contactName,
+    contactPhone,
+    message,
+    onChange,
+    onClose,
+    onSubmit,
+}: {
+    open: boolean;
+    contactName: string;
+    contactPhone: string;
+    message: string;
+    onChange: (message: string) => void;
+    onClose: () => void;
+    onSubmit: () => void;
+}) {
+    const dialogRef = useDialogFocus<HTMLDivElement>(open, onClose);
+    if (!open) return null;
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 sm:items-center sm:p-4" role="presentation">
+            <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="customer-whatsapp-title"
+                className="max-h-[100dvh] w-full overflow-y-auto rounded-t-2xl bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5 sm:max-w-lg sm:rounded-2xl sm:border sm:border-border sm:p-6"
+            >
+                <div className="flex items-start gap-3">
+                    <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700">
+                        <Icon name="chat_bubble" className="size-5" />
+                    </div>
+                    <div className="min-w-0">
+                        <h2 id="customer-whatsapp-title" className="text-lg font-semibold text-foreground">
+                            Chamar pelo seu WhatsApp
+                        </h2>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                            Revise o texto que será aberto na conversa com {contactName}.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="mt-5 rounded-xl bg-surface-alt px-3 py-2.5 text-sm">
+                    <span className="text-muted-foreground">Telefone cadastrado</span>
+                    <span className="ml-2 font-medium text-foreground">{contactPhone}</span>
+                </div>
+
+                <label className="mt-4 block">
+                    <span className="mb-1.5 block text-sm font-medium text-foreground">Mensagem</span>
+                    <textarea
+                        aria-label="Mensagem"
+                        value={message}
+                        onChange={(event) => onChange(event.target.value)}
+                        rows={8}
+                        maxLength={2000}
+                        className="w-full resize-none rounded-xl border border-border bg-surface px-3 py-3 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
+                    />
+                    <span className="mt-1 block text-right text-xs text-muted-foreground">{message.length}/2000</span>
+                </label>
+
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                    O CRM abrirá o WhatsApp deste aparelho. Confira a conta selecionada e toque em enviar dentro do WhatsApp.
+                </p>
+
+                <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <Button type="button" variant="outline" onClick={onClose}>
+                        Cancelar
+                    </Button>
+                    <Button type="button" onClick={onSubmit} disabled={!message.trim()}>
+                        <Icon name="chat_bubble" className="size-4" />
+                        Abrir meu WhatsApp
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function TicketDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -335,6 +442,8 @@ export default function TicketDetail() {
     const [savingCustomer, setSavingCustomer] = useState(false);
     const [notifyingGroup, setNotifyingGroup] = useState(false);
     const [customerEditorOpen, setCustomerEditorOpen] = useState(false);
+    const [customerMessageOpen, setCustomerMessageOpen] = useState(false);
+    const [customerMessage, setCustomerMessage] = useState('');
     const [customerForm, setCustomerForm] = useState<CustomerFormState>({
         customerName: '',
         customerDocument: '',
@@ -351,6 +460,7 @@ export default function TicketDetail() {
     const canEditTicketCore = Boolean(isManager || user?.role === 'ATTENDANT' || isAssignedTechnician);
     const canEditFieldService = Boolean(isManager || isAssignedTechnician);
     const canSaveTicket = Boolean(canEditTicketCore || canEditFieldService);
+    const canContactCustomer = Boolean(isManager || user?.role === 'ATTENDANT' || isAssignedTechnician);
 
     const loadTicket = () => {
         if (!id) return;
@@ -503,6 +613,28 @@ export default function TicketDetail() {
         }
     };
 
+    const openCustomerMessage = () => {
+        if (!ticket) return;
+        setCustomerMessage(buildDefaultCustomerMessage(ticket, user?.name));
+        setCustomerMessageOpen(true);
+    };
+
+    const openTechnicianWhatsApp = () => {
+        if (!ticket || !customerMessage.trim()) return;
+        setError(null);
+
+        const whatsappUrl = buildTechnicianWhatsAppUrl(ticket.contact.phone, customerMessage);
+        if (!whatsappUrl) {
+            const message = 'O telefone do cliente não é válido para abrir no WhatsApp.';
+            setError(message);
+            showToast({ title: 'WhatsApp não aberto', description: message, variant: 'error' });
+            return;
+        }
+
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+        setCustomerMessageOpen(false);
+    };
+
     return (
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <SigmaSidebarIcon user={user} onLogout={logout} />
@@ -559,6 +691,16 @@ export default function TicketDetail() {
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap gap-2">
+                                        {canContactCustomer && <Button
+                                            type="button"
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={openCustomerMessage}
+                                            className="w-full sm:w-auto"
+                                        >
+                                            <Icon name="chat_bubble" className="size-4" />
+                                            Chamar no WhatsApp
+                                        </Button>}
                                         {!isTechnician && <Link
                                             to={`/tasks?new=1&ticketId=${ticket.id}&contactId=${ticket.contact.id}${ticket.customer?.id ? `&customerId=${ticket.customer.id}` : ''}${ticket.serviceTopicId ? `&serviceTopicId=${ticket.serviceTopicId}` : ''}${ticket.fieldService?.id ? `&fieldServiceId=${ticket.fieldService.id}` : ''}`}
                                             className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-alt"
@@ -816,6 +958,15 @@ export default function TicketDetail() {
                 onChange={setCustomerForm}
                 onClose={() => setCustomerEditorOpen(false)}
                 onSubmit={saveCustomerInfo}
+            />
+            <CustomerWhatsAppDialog
+                open={customerMessageOpen}
+                contactName={ticket?.contact.name || ticket?.customer?.name || 'o cliente'}
+                contactPhone={ticket?.contact.phone || ''}
+                message={customerMessage}
+                onChange={setCustomerMessage}
+                onClose={() => setCustomerMessageOpen(false)}
+                onSubmit={openTechnicianWhatsApp}
             />
         </div>
     );
