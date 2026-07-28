@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { StatusBadge, PriorityBadge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -165,6 +165,8 @@ interface ManualTicketModalProps {
     departments: DepartmentOption[];
     loading: boolean;
     error: string | null;
+    currentUserId?: string;
+    technicianMode?: boolean;
     onContactQueryChange: (query: string) => void;
     onClose: () => void;
     onSubmit: (payload: ManualTicketPayload) => Promise<void>;
@@ -180,6 +182,8 @@ function ManualTicketModal({
     departments,
     loading,
     error,
+    currentUserId,
+    technicianMode = false,
     onContactQueryChange,
     onClose,
     onSubmit,
@@ -226,18 +230,18 @@ function ManualTicketModal({
         setChannel('PHONE');
         setDescription('');
         setCategory('');
-        setAssignedUserId('');
+        setAssignedUserId(technicianMode ? currentUserId || '' : '');
         setDepartmentId('');
         setExternalService(true);
         setServiceType('PRESENCIAL');
-        setTechnicianId(technicians[0]?.id || '');
+        setTechnicianId(technicianMode ? currentUserId || '' : technicians[0]?.id || '');
         setScheduledAt('');
         setVisitAddress('');
         setEquipment('');
         setNotesInternal('');
         onContactQueryChange('');
         window.setTimeout(() => titleInputRef.current?.focus(), 0);
-    }, [open, technicians, onContactQueryChange]);
+    }, [open, technicians, onContactQueryChange, technicianMode, currentUserId]);
 
     useEffect(() => {
         if (!open) return;
@@ -281,13 +285,15 @@ function ManualTicketModal({
             channel,
             description: description.trim() || null,
             category: category.trim() || null,
-            assignedUserId: assignedUserId || (externalService && technicianId ? technicianId : null),
+            assignedUserId: technicianMode
+                ? currentUserId || null
+                : assignedUserId || (externalService && technicianId ? technicianId : null),
             departmentId: departmentId || null,
             notesInternal: notesInternal.trim() || null,
             ...(externalService ? {
                 serviceType,
                 onSiteRequired: serviceType !== 'REMOTO',
-                technicianId: technicianId || null,
+                technicianId: technicianMode ? currentUserId || null : technicianId || null,
                 scheduledAt: scheduledAt ? new Date(scheduledAt).toISOString() : null,
                 visitAddress: visitAddress.trim() || null,
                 equipment: equipment.trim() || null,
@@ -299,18 +305,22 @@ function ManualTicketModal({
     if (!open) return null;
 
     return (
-        <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="manual-ticket-title">
-            <form onSubmit={submit} className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-lifted">
+        <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="manual-ticket-title">
+            <form onSubmit={submit} className="h-[100dvh] w-full max-w-3xl overflow-y-auto border-border bg-surface px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-[max(1rem,env(safe-area-inset-top))] shadow-lifted sm:h-auto sm:max-h-[92vh] sm:rounded-2xl sm:border sm:p-6">
                 <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                     <div>
-                        <h2 id="manual-ticket-title" className="text-xl font-semibold text-foreground">Criar chamado manual</h2>
+                        <h2 id="manual-ticket-title" className="text-xl font-semibold text-foreground">{technicianMode ? 'Novo chamado' : 'Criar chamado manual'}</h2>
                         <p className="mt-1 text-sm text-muted-foreground">
-                            Para atendimentos abertos fora do WhatsApp ou antes do cliente chamar no suporte.
+                            {technicianMode
+                                ? 'Registre um atendimento externo e acompanhe a execução pelo celular.'
+                                : 'Para atendimentos abertos fora do WhatsApp ou antes do cliente chamar no suporte.'}
                         </p>
                     </div>
-                    <span className="inline-flex w-fit rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
-                        Sem conversa vinculada
-                    </span>
+                    {!technicianMode && (
+                        <span className="inline-flex w-fit rounded-full bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
+                            Sem conversa vinculada
+                        </span>
+                    )}
                 </div>
 
                 <div className="space-y-5">
@@ -455,40 +465,44 @@ function ManualTicketModal({
                             </select>
                         </label>
 
-                        <Input
-                            label="Categoria"
-                            value={category}
-                            onChange={(event) => setCategory(event.target.value)}
-                            placeholder="Opcional"
-                        />
+                        {!technicianMode && (
+                            <>
+                                <Input
+                                    label="Categoria"
+                                    value={category}
+                                    onChange={(event) => setCategory(event.target.value)}
+                                    placeholder="Opcional"
+                                />
 
-                        <label className="block space-y-1.5">
-                            <span className="block text-sm font-medium text-foreground">Departamento</span>
-                            <select
-                                value={departmentId}
-                                onChange={(event) => setDepartmentId(event.target.value)}
-                                className="h-11 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/40"
-                            >
-                                <option value="">Sem departamento</option>
-                                {departments.filter((department) => department.active ?? true).map((department) => (
-                                    <option key={department.id} value={department.id}>{department.name}</option>
-                                ))}
-                            </select>
-                        </label>
+                                <label className="block space-y-1.5">
+                                    <span className="block text-sm font-medium text-foreground">Departamento</span>
+                                    <select
+                                        value={departmentId}
+                                        onChange={(event) => setDepartmentId(event.target.value)}
+                                        className="h-11 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/40"
+                                    >
+                                        <option value="">Sem departamento</option>
+                                        {departments.filter((department) => department.active ?? true).map((department) => (
+                                            <option key={department.id} value={department.id}>{department.name}</option>
+                                        ))}
+                                    </select>
+                                </label>
 
-                        <label className="block space-y-1.5">
-                            <span className="block text-sm font-medium text-foreground">Responsavel</span>
-                            <select
-                                value={assignedUserId}
-                                onChange={(event) => setAssignedUserId(event.target.value)}
-                                className="h-11 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/40"
-                            >
-                                <option value="">Definir depois</option>
-                                {users.filter((userOption) => userOption.active ?? true).map((userOption) => (
-                                    <option key={userOption.id} value={userOption.id}>{userOption.name}</option>
-                                ))}
-                            </select>
-                        </label>
+                                <label className="block space-y-1.5">
+                                    <span className="block text-sm font-medium text-foreground">Responsavel</span>
+                                    <select
+                                        value={assignedUserId}
+                                        onChange={(event) => setAssignedUserId(event.target.value)}
+                                        className="h-11 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/40"
+                                    >
+                                        <option value="">Definir depois</option>
+                                        {users.filter((userOption) => userOption.active ?? true).map((userOption) => (
+                                            <option key={userOption.id} value={userOption.id}>{userOption.name}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </>
+                        )}
                     </div>
 
                     <label className="block space-y-1.5">
@@ -503,18 +517,25 @@ function ManualTicketModal({
                     </label>
 
                     <div className="rounded-xl border border-border bg-surface-alt p-4">
-                        <label className="mb-4 flex items-start gap-3">
-                            <input
-                                type="checkbox"
-                                checked={externalService}
-                                onChange={(event) => setExternalService(event.target.checked)}
-                                className="mt-1 h-4 w-4 accent-primary"
-                            />
-                            <span>
-                                <span className="block text-sm font-semibold text-foreground">Criar como atendimento externo / agenda</span>
-                                <span className="block text-xs text-muted-foreground">Use para um Chamado técnico, instalação, treinamento ou atendimento agendado.</span>
-                            </span>
-                        </label>
+                        {technicianMode ? (
+                            <div className="mb-4">
+                                <p className="text-sm font-semibold text-foreground">Dados da visita</p>
+                                <p className="mt-1 text-xs text-muted-foreground">O chamado será atribuído automaticamente a você.</p>
+                            </div>
+                        ) : (
+                            <label className="mb-4 flex items-start gap-3">
+                                <input
+                                    type="checkbox"
+                                    checked={externalService}
+                                    onChange={(event) => setExternalService(event.target.checked)}
+                                    className="mt-1 h-4 w-4 accent-primary"
+                                />
+                                <span>
+                                    <span className="block text-sm font-semibold text-foreground">Criar como atendimento externo / agenda</span>
+                                    <span className="block text-xs text-muted-foreground">Use para um Chamado técnico, instalação, treinamento ou atendimento agendado.</span>
+                                </span>
+                            </label>
+                        )}
 
                         {externalService && (
                             <div className="grid gap-4 md:grid-cols-2">
@@ -531,19 +552,21 @@ function ManualTicketModal({
                                     </select>
                                 </label>
 
-                                <label className="block space-y-1.5">
-                                    <span className="block text-sm font-medium text-foreground">Tecnico</span>
-                                    <select
-                                        value={technicianId}
-                                        onChange={(event) => setTechnicianId(event.target.value)}
-                                        className="h-11 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/40"
-                                    >
-                                        <option value="">Definir depois</option>
-                                        {technicians.filter((tech) => tech.active ?? true).map((tech) => (
-                                            <option key={tech.id} value={tech.id}>{tech.name}</option>
-                                        ))}
-                                    </select>
-                                </label>
+                                {!technicianMode && (
+                                    <label className="block space-y-1.5">
+                                        <span className="block text-sm font-medium text-foreground">Tecnico</span>
+                                        <select
+                                            value={technicianId}
+                                            onChange={(event) => setTechnicianId(event.target.value)}
+                                            className="h-11 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/40"
+                                        >
+                                            <option value="">Definir depois</option>
+                                            {technicians.filter((tech) => tech.active ?? true).map((tech) => (
+                                                <option key={tech.id} value={tech.id}>{tech.name}</option>
+                                            ))}
+                                        </select>
+                                    </label>
+                                )}
 
                                 <label className="block space-y-1.5">
                                     <span className="block text-sm font-medium text-foreground">Data e hora combinada</span>
@@ -608,7 +631,9 @@ function ManualTicketModal({
 
 export default function Tickets() {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const { user, logout } = useAuth();
+    const isTechnician = user?.role === 'TECHNICIAN';
     const { showToast } = useToast();
     const [tickets, setTickets] = useState<Ticket[]>([]);
     const [statusFilter, setStatusFilter] = useState<string>('');
@@ -627,6 +652,20 @@ export default function Tickets() {
     const [manualTicketError, setManualTicketError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const activeFilterCount = [statusFilter, priorityFilter, fieldVisitStatusFilter, technicianFilter, visitOnly ? 'visitOnly' : ''].filter(Boolean).length;
+
+    const openManualTicket = () => {
+        setManualTicketError(null);
+        setManualTicketOpen(true);
+    };
+
+    useEffect(() => {
+        if (searchParams.get('new') !== '1') return;
+        openManualTicket();
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.delete('new');
+        setSearchParams(nextParams, { replace: true });
+    }, [searchParams, setSearchParams]);
 
     const loadTickets = () => {
         setIsLoading(true);
@@ -803,21 +842,66 @@ export default function Tickets() {
     return (
         <div className="flex h-screen bg-background text-foreground font-sans overflow-hidden">
             <SigmaSidebarIcon user={user} onLogout={logout} />
-            <main className="flex-1 flex flex-col overflow-y-auto p-4 pb-20 md:p-8 md:pb-8">
-                <div className="flex justify-between items-center mb-8">
-                    <div>
-                        <h1 className="text-3xl font-display font-bold text-foreground mb-2">Chamados e Atendimentos</h1>
-                        <p className="text-muted-foreground">Gerencie ordens de serviço presenciais e remotas</p>
+            <main className="flex flex-1 flex-col overflow-y-auto px-4 pb-28 pt-[max(1rem,env(safe-area-inset-top))] md:p-8 md:pb-8">
+                <div className="mb-5 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                        <h1 className="text-2xl font-bold text-foreground sm:text-3xl">{isTechnician ? 'Meus chamados' : 'Chamados e Atendimentos'}</h1>
+                        <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+                            {isTechnician ? 'Acompanhe e registre seus atendimentos externos.' : 'Gerencie ordens de serviço presenciais e remotas'}
+                        </p>
                     </div>
-                    <Button type="button" onClick={() => {
-                        setManualTicketError(null);
-                        setManualTicketOpen(true);
-                    }}>
+                    <Button type="button" onClick={openManualTicket} className="w-full sm:w-auto">
                         Criar chamado
                     </Button>
                 </div>
 
-                <div className="grid gap-4 mb-6 bg-surface p-4 rounded-xl border border-border shadow-card md:grid-cols-5">
+                <details className="mb-4 rounded-xl border border-border bg-surface lg:hidden">
+                    <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between px-4 text-sm font-semibold text-foreground">
+                        <span>Filtros</span>
+                        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs text-primary">{activeFilterCount} ativos</span>
+                    </summary>
+                    <div className="grid grid-cols-2 gap-3 border-t border-border p-3">
+                        <label className="col-span-2">
+                            <span className="mb-1 block text-xs font-medium text-muted-foreground">Status</span>
+                            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground">
+                                <option value="">Todos</option>
+                                <option value="NEW">Novos</option>
+                                <option value="QUEUED">Na fila</option>
+                                <option value="IN_PROGRESS">Em andamento</option>
+                                <option value="WAITING_CUSTOMER">Aguardando cliente</option>
+                                <option value="SCHEDULED_FIELD_SERVICE">Visita agendada</option>
+                                <option value="RESOLVED">Resolvidos</option>
+                                <option value="CLOSED">Fechados</option>
+                                <option value="CANCELED">Cancelados</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span className="mb-1 block text-xs font-medium text-muted-foreground">Prioridade</span>
+                            <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground">
+                                <option value="">Todas</option>
+                                <option value="LOW">Baixa</option>
+                                <option value="MEDIUM">Média</option>
+                                <option value="HIGH">Alta</option>
+                                <option value="CRITICAL">Crítica</option>
+                            </select>
+                        </label>
+                        <label>
+                            <span className="mb-1 block text-xs font-medium text-muted-foreground">Visita</span>
+                            <select value={fieldVisitStatusFilter} onChange={(event) => setFieldVisitStatusFilter(event.target.value)} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm text-foreground">
+                                <option value="">Todas</option>
+                                {Object.entries(fieldVisitStatusLabels).map(([value, label]) => (
+                                    <option key={value} value={value}>{label}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="col-span-2 flex min-h-11 items-center gap-2 rounded-lg bg-surface-alt px-3 text-sm text-foreground">
+                            <input type="checkbox" checked={visitOnly} onChange={(event) => setVisitOnly(event.target.checked)} className="size-5 accent-primary" />
+                            Apenas atendimentos externos
+                        </label>
+                    </div>
+                </details>
+
+                <div className={`mb-6 hidden gap-4 rounded-xl border border-border bg-surface p-4 shadow-card lg:grid ${isTechnician ? 'lg:grid-cols-4' : 'lg:grid-cols-5'}`}>
                     <div className="flex-1 max-w-xs">
                         <label htmlFor="ticket-status-filter" className="mb-2 block text-sm font-medium text-foreground">Status</label>
                         <select
@@ -852,7 +936,7 @@ export default function Tickets() {
                             <option value="CRITICAL">Crítica</option>
                         </select>
                     </div>
-                    <div className="flex-1 max-w-xs">
+                    {!isTechnician && <div className="flex-1 max-w-xs">
                         <label htmlFor="ticket-technician-filter" className="mb-2 block text-sm font-medium text-foreground">Técnico</label>
                         <select
                             id="ticket-technician-filter"
@@ -865,7 +949,7 @@ export default function Tickets() {
                                 <option key={technician.id} value={technician.id}>{technician.name}</option>
                             ))}
                         </select>
-                    </div>
+                    </div>}
                     <div className="flex-1 max-w-xs">
                         <label htmlFor="ticket-visit-status-filter" className="mb-2 block text-sm font-medium text-foreground">Status da visita</label>
                         <select
@@ -891,8 +975,58 @@ export default function Tickets() {
                     </label>
                 </div>
 
-                <div className="bg-surface rounded-xl border border-border shadow-card overflow-hidden flex-1 flex flex-col">
-                    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Lista de chamados com rolagem horizontal">
+                <div className="flex flex-1 flex-col lg:overflow-hidden lg:rounded-xl lg:border lg:border-border lg:bg-surface lg:shadow-card">
+                    <div className="space-y-3 lg:hidden" aria-label="Lista de chamados">
+                        {isLoading && Array.from({ length: 4 }).map((_, index) => (
+                            <div key={index} className="h-36 animate-pulse rounded-xl bg-surface-alt" />
+                        ))}
+                        {error && (
+                            <div role="alert" className="rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger-fg">
+                                {error}
+                            </div>
+                        )}
+                        {!isLoading && !error && tickets.length === 0 && (
+                            <div className="rounded-xl border border-border bg-surface p-4">
+                                <EmptyState
+                                    icon="confirmation_number"
+                                    title="Nenhum chamado encontrado"
+                                    description="Ajuste os filtros ou crie um novo chamado."
+                                />
+                            </div>
+                        )}
+                        {!isLoading && !error && tickets.map((ticket) => (
+                            <Link
+                                key={ticket.id}
+                                to={`/tickets/${ticket.id}`}
+                                className="block rounded-xl border border-border bg-surface p-4 transition-colors active:bg-surface-alt"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-semibold text-primary">{ticket.protocol || `#${ticket.id.slice(0, 6)}`}</p>
+                                        <h2 className="mt-1 line-clamp-2 text-base font-semibold text-foreground">{ticket.title}</h2>
+                                        <p className="mt-1 truncate text-sm text-muted-foreground">
+                                            {ticket.customer?.name || ticket.contact?.name || ticket.contact?.phone}
+                                        </p>
+                                    </div>
+                                    <StatusBadge status={ticket.status} />
+                                </div>
+                                <div className="mt-4 flex flex-wrap items-center gap-2">
+                                    <PriorityBadge priority={ticket.priority} />
+                                    {ticket.fieldService?.status && (
+                                        <span className="rounded-full bg-surface-alt px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                                            {fieldVisitStatusLabels[ticket.fieldService.status] || ticket.fieldService.status}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="mt-4 flex items-center justify-between gap-3 border-t border-border pt-3 text-sm">
+                                    <span className="truncate text-muted-foreground">{formatVisitDate(ticket)}</span>
+                                    <span className="shrink-0 font-semibold text-primary">Abrir chamado</span>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+
+                    <div className="hidden overflow-x-auto lg:block" tabIndex={0} role="region" aria-label="Lista de chamados com rolagem horizontal">
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="bg-surface-alt border-b border-border">
@@ -1004,6 +1138,8 @@ export default function Tickets() {
                 departments={departments}
                 loading={manualTicketLoading}
                 error={manualTicketError}
+                currentUserId={user?.id}
+                technicianMode={isTechnician}
                 onContactQueryChange={setContactQuery}
                 onClose={() => setManualTicketOpen(false)}
                 onSubmit={handleCreateManualTicket}

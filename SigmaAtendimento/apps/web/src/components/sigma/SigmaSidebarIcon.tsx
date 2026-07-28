@@ -33,9 +33,16 @@ const managementItems: NavItem[] = [
     { path: '/settings', label: 'Configurações', icon: 'settings' },
 ];
 
+const technicianItems: NavItem[] = [
+    { path: '/tickets', label: 'Chamados', icon: 'local_activity' },
+    { path: '/tasks', label: 'Tarefas', icon: 'task_list' },
+    { path: '/reports', label: 'Relatórios', icon: 'bar_chart' },
+];
+
 export function SigmaSidebarIcon({ user, onLogout, collapsible = false }: SigmaSidebarIconProps) {
     const location = useLocation();
     const canManage = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+    const isTechnician = user?.role === 'TECHNICIAN';
     const [moreOpen, setMoreOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [drawerOpen, setDrawerOpen] = useState(false);
@@ -224,6 +231,70 @@ export function SigmaSidebarIcon({ user, onLogout, collapsible = false }: SigmaS
                     </>
                 )}
             </>
+        );
+    }
+
+    if (isTechnician) {
+        return (
+            <aside className="fixed inset-x-3 z-50 h-16 rounded-full border border-border bg-surface shadow-lifted bottom-[max(0.75rem,env(safe-area-inset-bottom))] md:static md:h-screen md:w-20 md:flex-shrink-0 md:rounded-none md:border-y-0 md:border-l-0 md:border-r">
+                <div className="hidden h-full flex-col items-center py-5 md:flex">
+                    <Link
+                        to="/tickets"
+                        aria-label="Sigma Atendimento — chamados"
+                        className="mb-7 flex size-12 items-center justify-center rounded-xl border-2 border-primary-solid text-primary transition-colors hover:bg-primary/10"
+                    >
+                        <Icon name="engineering" className="size-6" />
+                    </Link>
+                    <nav aria-label="Navegação do técnico" className="flex flex-col items-center gap-2">
+                        {technicianItems.map(desktopLink)}
+                    </nav>
+                    <div className="mt-auto flex flex-col items-center gap-2">
+                        <NotificationBell />
+                        <ThemeToggle />
+                        <button
+                            type="button"
+                            onClick={onLogout}
+                            aria-label="Sair"
+                            title="Sair"
+                            className="flex size-11 items-center justify-center rounded-full border border-border text-sm font-bold text-danger transition-colors hover:bg-danger-soft"
+                        >
+                            {user?.name?.charAt(0).toUpperCase() || 'T'}
+                        </button>
+                    </div>
+                </div>
+
+                <nav aria-label="Navegação do técnico" className="grid h-full grid-cols-4 items-center gap-1 px-1.5 md:hidden">
+                    <Link
+                        to="/tickets"
+                        aria-label="Chamados"
+                        aria-current={isActive('/tickets') && !location.search.includes('new=1') ? 'page' : undefined}
+                        className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-full px-1 text-[10px] font-semibold transition-colors ${isActive('/tickets') && !location.search.includes('new=1') ? 'bg-primary-solid text-primary-solid-fg' : 'text-muted-foreground'}`}
+                    >
+                        <Icon name="local_activity" className="size-5" />
+                        <span>Chamados</span>
+                    </Link>
+                    <Link
+                        to="/tickets?new=1"
+                        aria-label="Criar chamado"
+                        className="flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-full px-1 text-[10px] font-semibold text-muted-foreground transition-colors active:bg-surface-alt"
+                    >
+                        <Icon name="add_ticket" className="size-5" />
+                        <span>Novo</span>
+                    </Link>
+                    {technicianItems.slice(1).map((item) => (
+                        <Link
+                            key={item.path}
+                            to={item.path}
+                            aria-label={item.label}
+                            aria-current={isActive(item.path) ? 'page' : undefined}
+                            className={`flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 rounded-full px-1 text-[10px] font-semibold transition-colors ${isActive(item.path) ? 'bg-primary-solid text-primary-solid-fg' : 'text-muted-foreground'}`}
+                        >
+                            <Icon name={item.icon} className="size-5" />
+                            <span>{item.label}</span>
+                        </Link>
+                    ))}
+                </nav>
+            </aside>
         );
     }
 

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { clearAuthToken, getAuthToken } from './lib/authToken';
 import { AuthProvider, useAuth } from './lib/auth';
 
@@ -109,18 +109,25 @@ function RoleGuard({ allowedRoles, children }: { allowedRoles: string[]; childre
     return <>{children}</>;
 }
 
+function HideFromTechnicians({ children }: { children: React.ReactNode }) {
+    const { user, loading } = useAuth();
+    if (loading) return <LoadingScreen />;
+    if (user?.role === 'TECHNICIAN') return <Navigate to="/tickets" replace />;
+    return <>{children}</>;
+}
+
 function App() {
     return (
         <AppSuspense>
             <Routes>
                 <Route path="/login" element={<Login />} />
-                <Route path="/" element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
-                <Route path="/inbox" element={<ProtectedLayout><Inbox /></ProtectedLayout>} />
+                <Route path="/" element={<ProtectedLayout><HideFromTechnicians><Dashboard /></HideFromTechnicians></ProtectedLayout>} />
+                <Route path="/inbox" element={<ProtectedLayout><HideFromTechnicians><Inbox /></HideFromTechnicians></ProtectedLayout>} />
                 <Route path="/notifications" element={<ProtectedLayout><Notifications /></ProtectedLayout>} />
                 <Route path="/tickets" element={<ProtectedLayout><Tickets /></ProtectedLayout>} />
                 <Route path="/tickets/:id" element={<ProtectedLayout><TicketDetail /></ProtectedLayout>} />
-                <Route path="/visits" element={<ProtectedLayout><Visits /></ProtectedLayout>} />
-                <Route path="/customers" element={<ProtectedLayout><Customers /></ProtectedLayout>} />
+                <Route path="/visits" element={<ProtectedLayout><HideFromTechnicians><Visits /></HideFromTechnicians></ProtectedLayout>} />
+                <Route path="/customers" element={<ProtectedLayout><HideFromTechnicians><Customers /></HideFromTechnicians></ProtectedLayout>} />
                 <Route
                     path="/users"
                     element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><Users /></RoleGuard></ProtectedLayout>}
@@ -134,7 +141,7 @@ function App() {
                     element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><ServiceTopics /></RoleGuard></ProtectedLayout>}
                 />
                 <Route path="/reports" element={<ProtectedLayout><Reports /></ProtectedLayout>} />
-                <Route path="/assistant" element={<ProtectedLayout><Assistant /></ProtectedLayout>} />
+                <Route path="/assistant" element={<ProtectedLayout><HideFromTechnicians><Assistant /></HideFromTechnicians></ProtectedLayout>} />
                 <Route path="/tasks" element={<ProtectedLayout><Tasks /></ProtectedLayout>} />
                 <Route
                     path="/settings"

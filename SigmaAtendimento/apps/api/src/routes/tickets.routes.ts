@@ -105,6 +105,7 @@ const attendantUpdateFields = new Set([
     'status', 'title', 'description', 'category', 'notesInternal',
 ]);
 const technicianUpdateFields = new Set([
+    'status', 'notesInternal',
     'equipment', 'visitAddress', 'visitWindowStart', 'visitWindowEnd',
     'scheduledAt', 'scheduleChangeReason', 'startedAt', 'finishedAt',
     'hoursSpent', 'resolution', 'result', 'serviceDescription',
@@ -526,6 +527,14 @@ router.post('/', async (req, res) => {
         if (!parsed.success) {
             return res.status(400).json({ error: 'Dados inválidos', details: parsed.error.issues });
         }
+        if (req.user?.role === 'TECHNICIAN') {
+            if (parsed.data.technicianId !== req.user.id) {
+                return res.status(403).json({ error: 'O técnico deve criar o chamado atribuído a si mesmo.' });
+            }
+            if (parsed.data.assignedUserId && parsed.data.assignedUserId !== req.user.id) {
+                return res.status(403).json({ error: 'O técnico não pode atribuir o chamado a outro usuário.' });
+            }
+        }
         const { contactId, customerId, conversationId, title, description, category, channel, priority, departmentId, assignedUserId, notesInternal } = parsed.data;
         const { has: hasFS, fs } = extractFieldService(parsed.data);
         await assertTenantReferences(companyId, {
@@ -637,6 +646,7 @@ router.patch('/:id', async (req, res) => {
             ? parsed.data.fieldVisitStatus
             : previousFieldVisitStatus;
         const fieldVisitStatusChanged = parsed.data.fieldVisitStatus !== undefined && previousFieldVisitStatus !== nextFieldVisitStatus;
+        const notesChanged = notesInternal !== undefined && notesInternal !== existing.notesInternal;
 
         if (scheduleChanged && !scheduleChangeReason?.trim()) {
             return res.status(400).json({ error: 'Informe o motivo da alteração de agenda' });
@@ -695,6 +705,17 @@ router.patch('/:id', async (req, res) => {
             if (data.status) {
                 await tx.ticketTimeline.create({
                     data: { companyId, ticketId: existing.id, type: 'STATUS_CHANGE', actorUserId: req.user?.id, payload: { from: existing.status, to: data.status } },
+                });
+            }
+            if (notesChanged) {
+                await tx.ticketTimeline.create({
+                    data: {
+                        companyId,
+                        ticketId: existing.id,
+                        type: 'NOTE',
+                        actorUserId: req.user?.id,
+                        payload: { action: 'NOTES_UPDATED' },
+                    },
                 });
             }
             if (assignedUserId !== undefined && assignedUserId !== existing.assignedUserId) {

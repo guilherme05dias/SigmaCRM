@@ -91,6 +91,7 @@ export default function Reports() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
     const canViewAll = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+    const isTechnician = user?.role === 'TECHNICIAN';
     const defaults = useMemo(initialDates, []);
     const [searchParams, setSearchParams] = useSearchParams();
     const filters = useMemo<ReportFilters>(() => ({
@@ -230,18 +231,20 @@ export default function Reports() {
     return (
         <div className="flex min-h-screen bg-background text-foreground">
             <SigmaSidebarIcon user={user} onLogout={logout} />
-            <main className="min-w-0 flex-1 pb-24 md:pb-8">
-                <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 md:p-8">
+            <main className="min-w-0 flex-1 pb-28 md:pb-8">
+                <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 pb-6 pt-[max(1rem,env(safe-area-inset-top))] md:gap-6 md:p-8">
                     <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                         <div>
-                            <h1 className="text-3xl font-bold tracking-tight">Relatórios</h1>
-                            <p className="mt-1 text-sm text-muted-foreground">Indicadores históricos de Atendimentos no WhatsApp e Chamados técnicos.</p>
+                            <h1 className="text-2xl font-bold sm:text-3xl">{isTechnician ? 'Meu desempenho' : 'Relatórios'}</h1>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                                {isTechnician ? 'Seus atendimentos e chamados no período selecionado.' : 'Indicadores históricos de Atendimentos no WhatsApp e Chamados técnicos.'}
+                            </p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" onClick={() => exportReport('csv')} loading={exporting === 'csv'} disabled={loading || exporting !== null}>
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                            <Button variant="outline" className="px-3" onClick={() => exportReport('csv')} loading={exporting === 'csv'} disabled={loading || exporting !== null}>
                                 Exportar CSV
                             </Button>
-                            <Button onClick={() => exportReport('xlsx')} loading={exporting === 'xlsx'} disabled={loading || exporting !== null}>
+                            <Button className="px-3" onClick={() => exportReport('xlsx')} loading={exporting === 'xlsx'} disabled={loading || exporting !== null}>
                                 <Icon name="bar_chart" className="size-4" /> Exportar Excel
                             </Button>
                         </div>
@@ -262,7 +265,7 @@ export default function Reports() {
                         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                             <label className="text-sm font-medium">De<input type="date" value={filters.from} onChange={(event) => updateFilters({ from: event.target.value })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30" /></label>
                             <label className="text-sm font-medium">Até<input type="date" value={filters.to} onChange={(event) => updateFilters({ to: event.target.value })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30" /></label>
-                            <label className="text-sm font-medium">Departamento<select value={filters.departmentId ?? ''} onChange={(event) => updateFilters({ departmentId: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"><option value="">Todos</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                            {!isTechnician && <label className="text-sm font-medium">Departamento<select value={filters.departmentId ?? ''} onChange={(event) => updateFilters({ departmentId: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"><option value="">Todos</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
                             {canViewAll && <label className="text-sm font-medium">Responsável<select value={filters.responsibleUserId ?? ''} onChange={(event) => updateFilters({ responsibleUserId: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"><option value="">Todos</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
                             {filters.type !== 'ticket' && <label className="text-sm font-medium">Status do Atendimento<select value={filters.attendanceStatus ?? ''} onChange={(event) => updateFilters({ attendanceStatus: (event.target.value || undefined) as ReportFilters['attendanceStatus'] })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground"><option value="">Todos</option>{Object.entries(attendanceStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
                             {filters.type !== 'attendance' && <label className="text-sm font-medium">Status do Chamado<select value={filters.ticketStatus ?? ''} onChange={(event) => updateFilters({ ticketStatus: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground"><option value="">Todos</option>{Object.entries(ticketStatusLabels).filter(([value]) => !['PENDING', 'SCHEDULED', 'COMPLETED'].includes(value)).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
@@ -276,11 +279,17 @@ export default function Reports() {
 
                         <section className="overflow-hidden rounded-2xl border border-border bg-surface">
                             <div className="border-b border-border px-5 py-4">
-                                <h2 className="text-lg font-semibold">Resumo por técnico</h2>
-                                <p className="text-sm text-muted-foreground">Atendimentos no WhatsApp e Chamados/visitas realizados por cada técnico no período.</p>
+                                <h2 className="text-lg font-semibold">{isTechnician ? 'Minha atividade' : 'Resumo por técnico'}</h2>
+                                <p className="text-sm text-muted-foreground">{isTechnician ? 'Totais registrados no período selecionado.' : 'Atendimentos no WhatsApp e Chamados/visitas realizados por cada técnico no período.'}</p>
                             </div>
                             {summary.technicians.length === 0 ? <div className="p-5"><EmptyState icon="engineering" title="Sem atividade técnica" description="Nenhum técnico possui Atendimentos ou Chamados nos filtros selecionados." /></div> : (
-                                <div className="overflow-x-auto">
+                                isTechnician ? (
+                                    <div className="grid grid-cols-3 divide-x divide-border p-4 text-center">
+                                        <div><p className="text-xl font-bold text-foreground">{summary.technicians[0]?.attendanceCount ?? 0}</p><p className="mt-1 text-xs text-muted-foreground">Atendimentos</p></div>
+                                        <div><p className="text-xl font-bold text-foreground">{summary.technicians[0]?.ticketCount ?? 0}</p><p className="mt-1 text-xs text-muted-foreground">Chamados</p></div>
+                                        <div><p className="text-xl font-bold text-primary">{summary.technicians[0]?.totalCount ?? 0}</p><p className="mt-1 text-xs text-muted-foreground">Total</p></div>
+                                    </div>
+                                ) : <div className="overflow-x-auto">
                                     <table className="w-full min-w-[640px] text-left text-sm">
                                         <thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr><th className="px-4 py-3">Técnico</th><th className="px-4 py-3">Atendimentos</th><th className="px-4 py-3">Chamados / Visitas</th><th className="px-4 py-3">Total</th>{canViewAll && <th className="px-4 py-3 text-right">Detalhes</th>}</tr></thead>
                                         <tbody className="divide-y divide-border">{summary.technicians.map((item) => <tr key={item.userId} className="hover:bg-surface-alt/60"><td className="px-4 py-3 font-semibold">{item.userName}</td><td className="px-4 py-3 font-mono">{item.attendanceCount}</td><td className="px-4 py-3 font-mono">{item.ticketCount}</td><td className="px-4 py-3 font-mono font-bold text-primary">{item.totalCount}</td>{canViewAll && <td className="px-4 py-2 text-right"><Button size="sm" variant="ghost" onClick={() => updateFilters({ responsibleUserId: item.userId })}>Ver clientes</Button></td>}</tr>)}</tbody>
@@ -291,13 +300,39 @@ export default function Reports() {
 
                         {filters.type !== 'ticket' && <section className="overflow-hidden rounded-2xl border border-border bg-surface">
                             <div className="border-b border-border px-5 py-4"><h2 className="text-lg font-semibold">Atendimentos</h2><p className="text-sm text-muted-foreground">{summary.attendance.messagesInbound} recebidas · {summary.attendance.messagesOutbound} enviadas · espera: {summary.attendance.averageWaitSeconds.sampleSize} registros · duração: {summary.attendance.averageHandleSeconds.sampleSize} registros</p></div>
-                            <div className="overflow-x-auto"><table className="w-full min-w-[1280px] text-left text-sm"><thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr>{['Cliente / Contato', 'Empresa', 'Técnico / Atendente', 'Data', 'Sistema / Produto', 'Observação', 'Departamento', 'Status', 'Duração', 'Avaliação'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-border">{attendances.map((item) => <tr key={item.id} className="align-top hover:bg-surface-alt/60"><td className="px-4 py-3 font-medium">{item.contactName}</td><td className="px-4 py-3 text-muted-foreground">{item.companyName ?? '—'}</td><td className="px-4 py-3">{item.attendantName ?? 'Não definido'}</td><td className="px-4 py-3 whitespace-nowrap">{new Date(item.createdAt).toLocaleString('pt-BR')}</td><td className="px-4 py-3">{item.systemProduct ?? 'Não definido'}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3 text-muted-foreground">{item.observation ?? '—'}</td><td className="px-4 py-3">{item.departmentName ?? '—'}</td><td className="px-4 py-3"><Badge tone={item.status === 'CLOSED' ? 'success' : item.status === 'ASSIGNED' ? 'primary' : 'warning'}>{attendanceStatusLabels[item.status] ?? item.status}</Badge></td><td className="px-4 py-3">{formatDuration(item.durationSeconds)}</td><td className="px-4 py-3">{item.rating === null ? '—' : `${item.rating}/10`}</td></tr>)}</tbody></table></div>
+                            <div className="divide-y divide-border md:hidden">
+                                {attendances.map((item) => (
+                                    <article key={item.id} className="p-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0"><h3 className="truncate text-sm font-semibold text-foreground">{item.contactName}</h3><p className="mt-1 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString('pt-BR')}</p></div>
+                                            <Badge tone={item.status === 'CLOSED' ? 'success' : item.status === 'ASSIGNED' ? 'primary' : 'warning'}>{attendanceStatusLabels[item.status] ?? item.status}</Badge>
+                                        </div>
+                                        <p className="mt-3 text-sm text-foreground">{item.systemProduct ?? 'Sistema não informado'}</p>
+                                        {item.observation && <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{item.observation}</p>}
+                                        <p className="mt-3 text-xs text-muted-foreground">Duração: {formatDuration(item.durationSeconds)}</p>
+                                    </article>
+                                ))}
+                            </div>
+                            <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[1280px] text-left text-sm"><thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr>{['Cliente / Contato', 'Empresa', 'Técnico / Atendente', 'Data', 'Sistema / Produto', 'Observação', 'Departamento', 'Status', 'Duração', 'Avaliação'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-border">{attendances.map((item) => <tr key={item.id} className="align-top hover:bg-surface-alt/60"><td className="px-4 py-3 font-medium">{item.contactName}</td><td className="px-4 py-3 text-muted-foreground">{item.companyName ?? '—'}</td><td className="px-4 py-3">{item.attendantName ?? 'Não definido'}</td><td className="px-4 py-3 whitespace-nowrap">{new Date(item.createdAt).toLocaleString('pt-BR')}</td><td className="px-4 py-3">{item.systemProduct ?? 'Não definido'}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3 text-muted-foreground">{item.observation ?? '—'}</td><td className="px-4 py-3">{item.departmentName ?? '—'}</td><td className="px-4 py-3"><Badge tone={item.status === 'CLOSED' ? 'success' : item.status === 'ASSIGNED' ? 'primary' : 'warning'}>{attendanceStatusLabels[item.status] ?? item.status}</Badge></td><td className="px-4 py-3">{formatDuration(item.durationSeconds)}</td><td className="px-4 py-3">{item.rating === null ? '—' : `${item.rating}/10`}</td></tr>)}</tbody></table></div>
                             {attendances.length === 0 ? <div className="p-5"><EmptyState icon="chat" title="Nenhum Atendimento" description="Não há Atendimentos que correspondam aos filtros atuais." /></div> : attendanceCursor && <div className="border-t border-border p-4 text-center"><Button variant="outline" loading={loadingMore} onClick={() => loadMore('attendance')}>Carregar mais Atendimentos</Button></div>}
                         </section>}
 
                         {filters.type !== 'attendance' && <section className="overflow-hidden rounded-2xl border border-border bg-surface">
                             <div className="border-b border-border px-5 py-4"><h2 className="text-lg font-semibold">Chamados</h2><p className="text-sm text-muted-foreground">{summary.tickets.whatsappOrigin} via WhatsApp · {summary.tickets.manualOrigin} manuais · {summary.tickets.withoutTechnician} sem técnico · {summary.tickets.withoutSchedule} sem data · duração: {summary.tickets.averageExecutionSeconds.sampleSize} registros</p></div>
-                            <div className="overflow-x-auto"><table className="w-full min-w-[1200px] text-left text-sm"><thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr>{['Protocolo', 'Cliente', 'Origem', 'Técnico', 'Data', 'Sistema / Produto', 'Observação', 'Departamento', 'Status', 'Duração'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-border">{tickets.map((item) => <tr key={item.id} className="align-top hover:bg-surface-alt/60"><td className="px-4 py-3 font-medium">{item.protocol ?? item.id.slice(0, 8)}</td><td className="px-4 py-3">{item.customerName}</td><td className="px-4 py-3">{item.origin === 'WHATSAPP' ? 'WhatsApp' : 'Manual'}</td><td className="px-4 py-3">{item.technicianName ?? 'Não definido'}</td><td className="px-4 py-3 whitespace-nowrap">{new Date(item.reportDate).toLocaleString('pt-BR')}</td><td className="px-4 py-3">{item.systemProduct ?? 'Não definido'}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3 text-muted-foreground">{item.observation ?? '—'}</td><td className="px-4 py-3">{item.departmentName ?? '—'}</td><td className="px-4 py-3"><Badge tone={item.status === 'CANCELED' ? 'danger' : item.status === 'CLOSED' || item.status === 'RESOLVED' ? 'success' : 'primary'}>{ticketStatusLabels[item.status] ?? item.status}</Badge></td><td className="px-4 py-3">{formatDuration(item.durationSeconds)}</td></tr>)}</tbody></table></div>
+                            <div className="divide-y divide-border md:hidden">
+                                {tickets.map((item) => (
+                                    <article key={item.id} className="p-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0"><p className="text-xs font-semibold text-primary">{item.protocol ?? item.id.slice(0, 8)}</p><h3 className="mt-1 truncate text-sm font-semibold text-foreground">{item.customerName}</h3></div>
+                                            <Badge tone={item.status === 'CANCELED' ? 'danger' : item.status === 'CLOSED' || item.status === 'RESOLVED' ? 'success' : 'primary'}>{ticketStatusLabels[item.status] ?? item.status}</Badge>
+                                        </div>
+                                        <p className="mt-3 text-sm text-foreground">{item.systemProduct ?? 'Sistema não informado'}</p>
+                                        {item.observation && <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{item.observation}</p>}
+                                        <div className="mt-3 flex justify-between gap-3 text-xs text-muted-foreground"><span>{new Date(item.reportDate).toLocaleDateString('pt-BR')}</span><span>{formatDuration(item.durationSeconds)}</span></div>
+                                    </article>
+                                ))}
+                            </div>
+                            <div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[1200px] text-left text-sm"><thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr>{['Protocolo', 'Cliente', 'Origem', 'Técnico', 'Data', 'Sistema / Produto', 'Observação', 'Departamento', 'Status', 'Duração'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-border">{tickets.map((item) => <tr key={item.id} className="align-top hover:bg-surface-alt/60"><td className="px-4 py-3 font-medium">{item.protocol ?? item.id.slice(0, 8)}</td><td className="px-4 py-3">{item.customerName}</td><td className="px-4 py-3">{item.origin === 'WHATSAPP' ? 'WhatsApp' : 'Manual'}</td><td className="px-4 py-3">{item.technicianName ?? 'Não definido'}</td><td className="px-4 py-3 whitespace-nowrap">{new Date(item.reportDate).toLocaleString('pt-BR')}</td><td className="px-4 py-3">{item.systemProduct ?? 'Não definido'}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3 text-muted-foreground">{item.observation ?? '—'}</td><td className="px-4 py-3">{item.departmentName ?? '—'}</td><td className="px-4 py-3"><Badge tone={item.status === 'CANCELED' ? 'danger' : item.status === 'CLOSED' || item.status === 'RESOLVED' ? 'success' : 'primary'}>{ticketStatusLabels[item.status] ?? item.status}</Badge></td><td className="px-4 py-3">{formatDuration(item.durationSeconds)}</td></tr>)}</tbody></table></div>
                             {tickets.length === 0 ? <div className="p-5"><EmptyState icon="local_activity" title="Nenhum Chamado" description="Não há Chamados que correspondam aos filtros atuais." /></div> : ticketCursor && <div className="border-t border-border p-4 text-center"><Button variant="outline" loading={loadingMore} onClick={() => loadMore('ticket')}>Carregar mais Chamados</Button></div>}
                         </section>}
 
