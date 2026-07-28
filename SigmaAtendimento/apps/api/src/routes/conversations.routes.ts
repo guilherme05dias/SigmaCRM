@@ -101,6 +101,7 @@ router.get('/', async (req: Request, res: Response) => {
             };
         }));
     } catch (error) {
+        console.error('[conversations] Falha ao listar conversas:', error);
         res.status(500).json({ error: 'Erro ao buscar conversas' });
     }
 });
@@ -353,6 +354,7 @@ router.get('/:id/messages', async (req: Request, res: Response) => {
             },
         });
     } catch (error) {
+        console.error('[conversations] Falha ao listar mensagens:', error);
         res.status(500).json({ error: 'Erro ao buscar mensagens' });
     }
 });
