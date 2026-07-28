@@ -7,10 +7,39 @@ let cachedCounts: Map<string, number> | null = null;
 let cacheExpiresAt = 0;
 let pendingRefresh: Promise<Map<string, number> | null> | null = null;
 
-export async function getProviderUnreadCounts(provider: IWhatsAppProvider): Promise<Map<string, number> | null> {
+type ProviderUnreadOptions = {
+    maxWaitMs?: number;
+};
+
+function waitForRefresh(
+    refresh: Promise<Map<string, number> | null>,
+    maxWaitMs?: number,
+): Promise<Map<string, number> | null> {
+    if (maxWaitMs === undefined) return refresh;
+
+    const waitMs = Math.max(0, maxWaitMs);
+    return new Promise((resolve) => {
+        let settled = false;
+        const timeoutId = setTimeout(() => {
+            settled = true;
+            resolve(cachedCounts);
+        }, waitMs);
+
+        void refresh.then((counts) => {
+            if (settled) return;
+            clearTimeout(timeoutId);
+            resolve(counts);
+        });
+    });
+}
+
+export async function getProviderUnreadCounts(
+    provider: IWhatsAppProvider,
+    options: ProviderUnreadOptions = {},
+): Promise<Map<string, number> | null> {
     if (!provider.listChatUnreadCounts) return null;
     if (cachedCounts && Date.now() < cacheExpiresAt) return cachedCounts;
-    if (pendingRefresh) return pendingRefresh;
+    if (pendingRefresh) return waitForRefresh(pendingRefresh, options.maxWaitMs);
 
     pendingRefresh = provider.listChatUnreadCounts()
         .then((chats) => {
@@ -32,7 +61,7 @@ export async function getProviderUnreadCounts(provider: IWhatsAppProvider): Prom
             pendingRefresh = null;
         });
 
-    return pendingRefresh;
+    return waitForRefresh(pendingRefresh, options.maxWaitMs);
 }
 
 export function invalidateProviderUnreadCounts() {

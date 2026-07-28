@@ -161,6 +161,8 @@ export default function Inbox() {
     const latestConversationsRequestIdRef = useRef(0);
     const messagesConversationGenerationRef = useRef(0);
     const latestMessagesRefreshRequestIdRef = useRef(0);
+    const conversationsRequestInFlightRef = useRef(false);
+    const messagesRefreshInFlightRef = useRef(false);
     const loadConversationsRef = useRef<((options?: { silent?: boolean }) => void) | null>(null);
     const loadMessagesRef = useRef<((id: string, options?: { cursor?: string | null; prepend?: boolean; silent?: boolean }) => void) | null>(null);
 
@@ -215,7 +217,10 @@ export default function Inbox() {
     };
 
     const loadConversations = (options: { silent?: boolean } = {}) => {
+        if (options.silent && conversationsRequestInFlightRef.current) return;
+
         if (!options.silent) setIsLoadingConversations(true);
+        conversationsRequestInFlightRef.current = true;
         const requestId = ++latestConversationsRequestIdRef.current;
         const scopeQuery = isManager ? `?scope=${managementScope}` : '';
         apiRequest<Conversation[]>(`/api/conversations${scopeQuery}`)
@@ -235,6 +240,7 @@ export default function Inbox() {
             })
             .finally(() => {
                 if (requestId === latestConversationsRequestIdRef.current) {
+                    conversationsRequestInFlightRef.current = false;
                     setIsLoadingConversations(false);
                 }
             });
@@ -293,11 +299,14 @@ export default function Inbox() {
     }, [user?.id, managementScope]);
 
     const loadMessages = (id: string, options: { cursor?: string | null; prepend?: boolean; silent?: boolean } = {}) => {
+        if (options.silent && !options.prepend && messagesRefreshInFlightRef.current) return;
+
         if (!options.silent) setIsLoadingMessages(true);
         const conversationGeneration = messagesConversationGenerationRef.current;
         const refreshRequestId = options.prepend
             ? null
             : ++latestMessagesRefreshRequestIdRef.current;
+        if (!options.prepend) messagesRefreshInFlightRef.current = true;
         const params = new URLSearchParams({ take: '50' });
         if (options.cursor) params.set('cursor', options.cursor);
 
@@ -340,7 +349,10 @@ export default function Inbox() {
                 );
                 const isLatestRefresh = options.prepend
                     || refreshRequestId === latestMessagesRefreshRequestIdRef.current;
-                if (isCurrentConversation && isLatestRefresh) setIsLoadingMessages(false);
+                if (isCurrentConversation && isLatestRefresh) {
+                    if (!options.prepend) messagesRefreshInFlightRef.current = false;
+                    setIsLoadingMessages(false);
+                }
             });
     };
     loadMessagesRef.current = loadMessages;

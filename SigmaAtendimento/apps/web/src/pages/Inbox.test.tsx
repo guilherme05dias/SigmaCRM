@@ -129,7 +129,10 @@ function deferred<T>() {
 }
 
 describe('estabilidade da conversa aberta durante atualizações', () => {
-    afterEach(() => cleanup());
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
 
     beforeEach(() => {
         vi.clearAllMocks();
@@ -271,5 +274,88 @@ describe('estabilidade da conversa aberta durante atualizações', () => {
 
         expect(screen.getByTestId('visible-messages')).toHaveTextContent('Mensagem anterior');
         expect(screen.getByTestId('visible-messages')).toHaveTextContent('Mensagem recebida agora');
+    });
+
+    it('não inicia atualizações silenciosas sobrepostas enquanto a lista ainda está carregando', async () => {
+        vi.useFakeTimers();
+        const conversationsRequest = deferred<Conversation[]>();
+
+        mocks.apiRequest.mockImplementation((path: string) => {
+            if (path === '/api/conversations?scope=all') return conversationsRequest.promise;
+            if (path === '/api/departments' || path === '/api/service-topics' || path === '/api/users') {
+                return Promise.resolve([]);
+            }
+            return Promise.reject(new Error(`Rota inesperada: ${path}`));
+        });
+
+        render(<MemoryRouter><Inbox /></MemoryRouter>);
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        expect(mocks.apiRequest.mock.calls.filter(([path]) => path === '/api/conversations?scope=all')).toHaveLength(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(7_500);
+        });
+
+        expect(mocks.apiRequest.mock.calls.filter(([path]) => path === '/api/conversations?scope=all')).toHaveLength(1);
+
+        await act(async () => {
+            conversationsRequest.resolve([]);
+            await conversationsRequest.promise;
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2_500);
+        });
+
+        expect(mocks.apiRequest.mock.calls.filter(([path]) => path === '/api/conversations?scope=all')).toHaveLength(2);
+    });
+
+    it('não inicia atualizações silenciosas sobrepostas das mensagens abertas', async () => {
+        vi.useFakeTimers();
+        const selected = conversation('conversation-a', 'contact-a');
+        const messagesRequest = deferred<{ data: Message[] }>();
+        let messageRequests = 0;
+
+        mocks.apiRequest.mockImplementation((path: string) => {
+            if (path === '/api/conversations?scope=all') return Promise.resolve([selected]);
+            if (path === '/api/departments' || path === '/api/service-topics' || path === '/api/users') {
+                return Promise.resolve([]);
+            }
+            if (path.startsWith('/api/conversations/conversation-a/messages')) {
+                messageRequests += 1;
+                return messagesRequest.promise;
+            }
+            if (path.endsWith('/read')) return Promise.resolve({ ok: true });
+            return Promise.reject(new Error(`Rota inesperada: ${path}`));
+        });
+
+        render(<MemoryRouter><Inbox /></MemoryRouter>);
+        await act(async () => {
+            await Promise.resolve();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Abrir conversation-a' }));
+        await act(async () => {
+            await Promise.resolve();
+        });
+        expect(messageRequests).toBe(1);
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(7_500);
+        });
+        expect(messageRequests).toBe(1);
+
+        await act(async () => {
+            messagesRequest.resolve({ data: [] });
+            await messagesRequest.promise;
+        });
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(2_500);
+        });
+        expect(messageRequests).toBe(2);
     });
 });

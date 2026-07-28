@@ -782,6 +782,7 @@ export class UazApiWhatsAppProvider implements IWhatsAppProvider {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-internal-token": this.internalToken },
             body: JSON.stringify(body),
+            signal: AbortSignal.timeout(20_000),
         });
         const result = await this.readJson<(T & { ok?: boolean; error?: string; details?: string })>(response);
         if (!response.ok || !result?.ok) throw new Error(result?.details || result?.error || `Falha na integração UAZAPI (${response.status})`);

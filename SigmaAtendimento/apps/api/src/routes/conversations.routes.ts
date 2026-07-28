@@ -88,7 +88,10 @@ router.get('/', async (req: Request, res: Response) => {
                     },
                 },
             }),
-            getProviderUnreadCounts(whatsappProvider),
+            // A lista principal nunca deve ficar bloqueada por uma consulta lenta
+            // ao provedor. Se o cache ainda não estiver pronto, usamos o contador
+            // persistido e deixamos a atualização da UAZAPI terminar em segundo plano.
+            getProviderUnreadCounts(whatsappProvider, { maxWaitMs: 750 }),
         ]);
 
         res.json(conversations.map((conversation) => {
