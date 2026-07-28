@@ -145,7 +145,7 @@ export default function Notifications() {
                             </div>
                             <h1 className="text-3xl font-bold tracking-tight text-foreground">Notificações</h1>
                             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                                Acompanhe avisos de visitas, agenda e próximos eventos operacionais sem sair do sistema.
+                                Acompanhe avisos de chamados, agenda, clientes aguardando resposta e tarefas pendentes sem sair do sistema.
                             </p>
                         </div>
 
@@ -233,7 +233,7 @@ export default function Notifications() {
                                     title="Nenhuma notificação encontrada"
                                     description={unreadOnly
                                         ? 'Você não tem notificações pendentes com os filtros atuais.'
-                                        : 'Avisos de visitas e agenda aparecerão aqui assim que forem gerados.'}
+                                        : 'Avisos de Chamados e agenda aparecerão aqui assim que forem gerados.'}
                                 />
                             ) : (
                                 <div className="space-y-3">
@@ -293,7 +293,7 @@ export default function Notifications() {
                                                                 size="sm"
                                                                 onClick={() => markAsRead(notification, true)}
                                                             >
-                                                                Abrir chamado
+                                                                Abrir
                                                             </Button>
                                                         )}
                                                     </div>
@@ -334,7 +334,7 @@ export default function Notifications() {
                                 <h2 className="text-lg font-semibold text-foreground">Como usar</h2>
                                 <div className="mt-4 space-y-3 text-sm text-muted-foreground">
                                     <p>Use “Apenas não lidas” para limpar a fila do dia mais rápido.</p>
-                                    <p>Abra o chamado direto pela notificação quando precisar revisar detalhes da visita.</p>
+                                    <p>Abra o atendimento, a tarefa ou o chamado relacionado diretamente pela notificação.</p>
                                     <p>O sino da navegação continua mostrando os últimos avisos em tempo real.</p>
                                 </div>
                             </div>

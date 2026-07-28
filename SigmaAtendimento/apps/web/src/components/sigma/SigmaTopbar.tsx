@@ -19,9 +19,11 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
 
     const navigation = [
         { path: '/', label: 'Dashboard', icon: 'dashboard' as const },
-        { path: '/inbox', label: 'Inbox', icon: 'chat' as const },
+        { path: '/inbox', label: 'Atendimentos', icon: 'chat' as const },
         { path: '/tickets', label: 'Chamados', icon: 'local_activity' as const },
+        { path: '/tasks', label: 'Tarefas', icon: 'task_list' as const },
         { path: '/customers', label: 'Clientes', icon: 'business' as const },
+        { path: '/assistant', label: 'Assistente', icon: 'assistant' as const },
         { path: '/reports', label: 'Relatórios', icon: 'bar_chart' as const },
         ...(canManage ? [
             { path: '/users', label: 'Usuários', icon: 'group' as const },
@@ -58,9 +60,11 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
 
                     <nav aria-label="Navegação principal" className="hidden items-center gap-5 2xl:flex">
                         <Link to="/" className={navLinkClass('/')}>Dashboard</Link>
-                        <Link to="/inbox" className={navLinkClass('/inbox')}>Inbox</Link>
-                        <Link to="/tickets" className={navLinkClass('/tickets')}>Tickets</Link>
+                        <Link to="/inbox" className={navLinkClass('/inbox')}>Atendimentos</Link>
+                        <Link to="/tickets" className={navLinkClass('/tickets')}>Chamados</Link>
+                        <Link to="/tasks" className={navLinkClass('/tasks')}>Tarefas</Link>
                         <Link to="/customers" className={navLinkClass('/customers')}>Clientes</Link>
+                        <Link to="/assistant" className={navLinkClass('/assistant')}>Assistente</Link>
                         <Link to="/users" className={navLinkClass('/users')}>Usuarios</Link>
                         <Link to="/departments" className={navLinkClass('/departments')}>Departamentos</Link>
                         <Link to="/service-topics" className={navLinkClass('/service-topics')}>Assuntos</Link>

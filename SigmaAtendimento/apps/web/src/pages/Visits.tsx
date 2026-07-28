@@ -132,9 +132,9 @@ export default function Visits() {
             .then((data) => setTickets(Array.isArray(data) ? data : []))
             .catch((err) => {
                 if (!redirectOnUnauthorized(err, navigate)) {
-                    const message = err instanceof Error ? err.message : 'Erro ao carregar visitas.';
+                    const message = err instanceof Error ? err.message : 'Erro ao carregar Chamados.';
                     setError(message);
-                    showToast({ title: 'Erro ao carregar visitas', description: message, variant: 'error' });
+                    showToast({ title: 'Erro ao carregar Chamados', description: message, variant: 'error' });
                 }
             })
             .finally(() => setLoading(false));
@@ -170,9 +170,9 @@ export default function Visits() {
                                 <Icon name="engineering" className="size-4" />
                                 Painel de campo
                             </div>
-                            <h1 className="text-3xl font-bold tracking-tight text-foreground">Visitas técnicas</h1>
+                            <h1 className="text-3xl font-bold tracking-tight text-foreground">Agenda técnica</h1>
                             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-                                Acompanhe visitas pendentes, agendas da semana e atendimentos em campo por técnico e status.
+                                Acompanhe Chamados pendentes, agendas da semana e atendimentos em campo por técnico e status.
                             </p>
                         </div>
                         <div className="grid grid-cols-3 gap-3 text-sm">
@@ -206,7 +206,7 @@ export default function Visits() {
                             </select>
                         </label>
                         <label>
-                            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status da visita</span>
+                            <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status do chamado</span>
                             <select
                                 value={statusFilter}
                                 onChange={(event) => setStatusFilter(event.target.value)}
@@ -277,7 +277,7 @@ export default function Visits() {
                                                 <div className="space-y-2">
                                                     {items.length === 0 ? (
                                                         <p className="rounded-lg border border-dashed border-border px-2 py-3 text-center text-xs text-muted-foreground">
-                                                            Sem visitas
+                                                            Sem Chamados
                                                         </p>
                                                     ) : items.map((ticket) => {
                                                         const fieldStatus = ticket.fieldService?.status || 'PENDING';
@@ -305,7 +305,7 @@ export default function Visits() {
 
                         <aside className="space-y-6">
                             <div className="rounded-2xl border border-border bg-surface p-4 shadow-card">
-                                <h2 className="mb-4 text-lg font-semibold text-foreground">Próximas visitas</h2>
+                                <h2 className="mb-4 text-lg font-semibold text-foreground">Próximos Chamados</h2>
                                 {loading ? (
                                     <div className="space-y-3">
                                         {Array.from({ length: 4 }).map((_, index) => (
@@ -319,8 +319,8 @@ export default function Visits() {
                                 ) : tickets.length === 0 ? (
                                     <EmptyState
                                         icon="engineering"
-                                        title="Nenhuma visita encontrada"
-                                        description="Ajuste os filtros ou crie uma visita a partir de um atendimento do WhatsApp."
+                                        title="Nenhum Chamado encontrado"
+                                        description="Ajuste os filtros ou crie um Chamado a partir de um Atendimento do WhatsApp."
                                     />
                                 ) : (
                                     <div className="space-y-3">

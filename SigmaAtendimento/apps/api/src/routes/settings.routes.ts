@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { requireAdminOrSupervisor } from '../middlewares/authorization.middleware';
 import { getCompanyId } from '../lib/tenant';
+import { DEFAULT_CLOSING_WITH_RATING_MESSAGE, DEFAULT_INACTIVITY_CLOSING_MESSAGE } from '../services/conversationClosure.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -20,7 +21,8 @@ const defaultBusinessHours = [
 const defaultMessages = {
     welcomeMessage: 'Ola! Seja bem-vindo a Sigma Atendimento. Em instantes um de nossos consultores ira falar com voce.',
     awayMessage: 'No momento estamos fora do nosso horario de atendimento. Deixe sua mensagem e retornaremos assim que possivel. Nosso horario e das 08:00 as 18:00.',
-    closingMessage: 'Atendimento encerrado. Se precisar de algo, envie uma nova mensagem.',
+    closingMessage: DEFAULT_CLOSING_WITH_RATING_MESSAGE,
+    inactivityClosingMessage: DEFAULT_INACTIVITY_CLOSING_MESSAGE,
 };
 
 router.get('/', async (req, res) => {
@@ -40,6 +42,8 @@ router.get('/', async (req, res) => {
             select: {
                 defaultTechnicianId: true,
                 defaultTechnician: { select: { id: true, name: true, email: true, role: true } },
+                defaultDepartmentId: true,
+                defaultDepartment: { select: { id: true, name: true } },
             },
         });
 
@@ -47,6 +51,8 @@ router.get('/', async (req, res) => {
             ...settings,
             defaultTechnicianId: company?.defaultTechnicianId ?? null,
             defaultTechnician: company?.defaultTechnician ?? null,
+            defaultDepartmentId: company?.defaultDepartmentId ?? null,
+            defaultDepartment: company?.defaultDepartment ?? null,
         });
     } catch (error) {
         res.status(500).json({ error: 'Erro ao buscar configuracoes' });
@@ -56,7 +62,7 @@ router.get('/', async (req, res) => {
 router.put('/', requireAdminOrSupervisor, async (req, res) => {
     try {
         const companyId = getCompanyId(req);
-        const { businessHours, welcomeMessage, awayMessage, closingMessage, defaultTechnicianId, externalServiceGroupId, externalServiceGroupName } = req.body ?? {};
+        const { businessHours, welcomeMessage, awayMessage, closingMessage, inactivityClosingMessage, defaultTechnicianId, defaultDepartmentId, externalServiceGroupId, externalServiceGroupName } = req.body ?? {};
 
         if (defaultTechnicianId !== undefined && defaultTechnicianId !== null && defaultTechnicianId !== '') {
             const technician = await prisma.user.findFirst({
@@ -68,6 +74,16 @@ router.put('/', requireAdminOrSupervisor, async (req, res) => {
             }
         }
 
+        if (defaultDepartmentId !== undefined && defaultDepartmentId !== null && defaultDepartmentId !== '') {
+            const department = await prisma.department.findFirst({
+                where: { id: defaultDepartmentId, companyId, active: true },
+                select: { id: true },
+            });
+            if (!department) {
+                return res.status(400).json({ error: 'Setor padrao invalido ou inativo' });
+            }
+        }
+
         const settings = await prisma.settings.upsert({
             where: { companyId },
             create: {
@@ -76,6 +92,7 @@ router.put('/', requireAdminOrSupervisor, async (req, res) => {
                 welcomeMessage: welcomeMessage ?? defaultMessages.welcomeMessage,
                 awayMessage: awayMessage ?? defaultMessages.awayMessage,
                 closingMessage: closingMessage ?? defaultMessages.closingMessage,
+                inactivityClosingMessage: inactivityClosingMessage ?? defaultMessages.inactivityClosingMessage,
                 externalServiceGroupId: externalServiceGroupId || null,
                 externalServiceGroupName: externalServiceGroupName || null,
             },
@@ -84,17 +101,24 @@ router.put('/', requireAdminOrSupervisor, async (req, res) => {
                 ...(welcomeMessage !== undefined ? { welcomeMessage } : {}),
                 ...(awayMessage !== undefined ? { awayMessage } : {}),
                 ...(closingMessage !== undefined ? { closingMessage } : {}),
+                ...(inactivityClosingMessage !== undefined ? { inactivityClosingMessage } : {}),
                 ...(externalServiceGroupId !== undefined ? { externalServiceGroupId: externalServiceGroupId || null } : {}),
                 ...(externalServiceGroupName !== undefined ? { externalServiceGroupName: externalServiceGroupName || null } : {}),
             },
         });
-        const company = defaultTechnicianId !== undefined
+        const shouldUpdateCompany = defaultTechnicianId !== undefined || defaultDepartmentId !== undefined;
+        const company = shouldUpdateCompany
             ? await prisma.company.update({
                 where: { id: companyId },
-                data: { defaultTechnicianId: defaultTechnicianId || null },
+                data: {
+                    ...(defaultTechnicianId !== undefined ? { defaultTechnicianId: defaultTechnicianId || null } : {}),
+                    ...(defaultDepartmentId !== undefined ? { defaultDepartmentId: defaultDepartmentId || null } : {}),
+                },
                 select: {
                     defaultTechnicianId: true,
                     defaultTechnician: { select: { id: true, name: true, email: true, role: true } },
+                    defaultDepartmentId: true,
+                    defaultDepartment: { select: { id: true, name: true } },
                 },
             })
             : await prisma.company.findUnique({
@@ -102,6 +126,8 @@ router.put('/', requireAdminOrSupervisor, async (req, res) => {
                 select: {
                     defaultTechnicianId: true,
                     defaultTechnician: { select: { id: true, name: true, email: true, role: true } },
+                    defaultDepartmentId: true,
+                    defaultDepartment: { select: { id: true, name: true } },
                 },
             });
 
@@ -109,6 +135,8 @@ router.put('/', requireAdminOrSupervisor, async (req, res) => {
             ...settings,
             defaultTechnicianId: company?.defaultTechnicianId ?? null,
             defaultTechnician: company?.defaultTechnician ?? null,
+            defaultDepartmentId: company?.defaultDepartmentId ?? null,
+            defaultDepartment: company?.defaultDepartment ?? null,
         });
     } catch (error) {
         res.status(400).json({ error: 'Erro ao salvar configuracoes' });

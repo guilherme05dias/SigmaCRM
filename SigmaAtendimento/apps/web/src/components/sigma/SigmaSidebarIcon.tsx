@@ -14,13 +14,15 @@ type NavItem = { path: string; label: string; icon: IconName };
 
 const primaryItems: NavItem[] = [
     { path: '/', label: 'Dashboard', icon: 'dashboard' },
-    { path: '/inbox', label: 'Inbox', icon: 'chat' },
+    { path: '/inbox', label: 'Atendimentos', icon: 'chat' },
     { path: '/tickets', label: 'Chamados', icon: 'local_activity' },
-    { path: '/visits', label: 'Visitas', icon: 'engineering' },
+    { path: '/tasks', label: 'Tarefas', icon: 'task_list' },
+    { path: '/visits', label: 'Agenda técnica', icon: 'engineering' },
 ];
 
 const secondaryItems: NavItem[] = [
     { path: '/customers', label: 'Clientes', icon: 'business' },
+    { path: '/assistant', label: 'Assistente', icon: 'assistant' },
     { path: '/reports', label: 'Relatórios', icon: 'bar_chart' },
 ];
 

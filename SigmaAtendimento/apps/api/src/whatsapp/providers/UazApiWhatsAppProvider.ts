@@ -194,14 +194,17 @@ export class UazApiWhatsAppProvider implements IWhatsAppProvider {
     }
 
     async listChatUnreadCounts(): Promise<WhatsAppUnreadChat[]> {
-        const payload = this.sendViaSupabaseEdge
-            ? await this.edgeJson<{ chats?: WhatsAppUnreadChat[] }>({ summaryOnly: true, chatLimit: 500 })
-            : { chats: this.collectionItems(await this.postJson("/chat/find", {
+        let chats: WhatsAppUnreadChat[];
+        if (this.sendViaSupabaseEdge) {
+            const payload = await this.edgeJson<{ chats?: WhatsAppUnreadChat[] }>({ summaryOnly: true, chatLimit: 500 });
+            chats = Array.isArray(payload.chats) ? payload.chats : [];
+        } else {
+            chats = this.collectionItems(await this.postJson("/chat/find", {
                 limit: 500,
                 offset: 0,
                 sort: "-wa_lastMsgTimestamp",
                 wa_isGroup: false,
-            })).map((source) => {
+            })).map<WhatsAppUnreadChat | null>((source) => {
                 const chat = this.asObject(source);
                 if (!chat || this.isGroupChat(chat)) return null;
                 const chatId = this.stringOrNull(chat.wa_chatid ?? chat.chatid ?? chat.chatId ?? chat.remoteJid ?? chat.id ?? chat.phone ?? chat.number);
@@ -210,17 +213,20 @@ export class UazApiWhatsAppProvider implements IWhatsAppProvider {
                 return {
                     phone,
                     unreadCount: Math.max(0, this.numberOrNull(chat.wa_unreadCount ?? chat.unreadCount) || 0),
+                    name: this.stringOrNull(chat.name ?? chat.wa_contactName ?? chat.wa_name ?? chat.pushName ?? chat.notifyName),
+                    lastMessageAt: this.numberOrNull(chat.wa_lastMsgTimestamp ?? chat.lastMessageAt ?? chat.timestamp),
                 };
-            }).filter((chat): chat is WhatsAppUnreadChat => Boolean(chat)) };
+            }).filter((chat): chat is WhatsAppUnreadChat => chat !== null);
+        }
 
-        return Array.isArray(payload.chats)
-            ? payload.chats
-                .map((chat) => ({
-                    phone: this.normalizePhone(String(chat.phone || "")),
-                    unreadCount: Math.max(0, Number(chat.unreadCount) || 0),
-                }))
-                .filter((chat) => chat.phone.length >= 10)
-            : [];
+        return chats
+            .map((chat) => ({
+                phone: this.normalizePhone(String(chat.phone || "")),
+                unreadCount: Math.max(0, Number(chat.unreadCount) || 0),
+                name: this.stringOrNull(chat.name),
+                lastMessageAt: this.numberOrNull(chat.lastMessageAt),
+            }))
+            .filter((chat) => chat.phone.length >= 10);
     }
 
     async listGroups(options: { limit?: number; sessionId?: string } = {}): Promise<WhatsAppGroup[]> {

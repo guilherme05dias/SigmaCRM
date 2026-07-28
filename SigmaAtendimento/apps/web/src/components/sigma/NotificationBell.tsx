@@ -134,7 +134,7 @@ export function NotificationBell() {
                             <div className="px-4 py-8 text-center">
                                 <Icon name="notifications" className="mx-auto mb-3 size-8 text-muted-foreground" />
                                 <p className="text-sm font-semibold text-foreground">Nada por enquanto</p>
-                                <p className="mt-1 text-xs text-muted-foreground">Avisos de visitas e agenda aparecerão aqui.</p>
+                                <p className="mt-1 text-xs text-muted-foreground">Avisos de Chamados e agenda aparecerão aqui.</p>
                             </div>
                         ) : (
                             <div className="space-y-1">

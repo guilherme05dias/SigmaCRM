@@ -4,7 +4,8 @@ export type NotificationType =
     | 'FIELD_VISIT_STATUS_CHANGED'
     | 'TICKET_ASSIGNED'
     | 'CONVERSATION_TRANSFERRED'
-    | 'CONVERSATION_FALLBACK_ASSIGNED';
+    | 'CONVERSATION_FALLBACK_ASSIGNED'
+    | 'ASSISTANT_TASK_DUE';
 
 export interface NotificationItem {
     id: string;
@@ -12,6 +13,13 @@ export interface NotificationItem {
     title: string;
     body?: string | null;
     link?: string | null;
+    payload?: {
+        mascotAgentId?: string;
+        mascotKind?: 'TASK_PENDING' | 'CUSTOMER_REPLY_DIGEST' | string;
+        assistantTaskId?: string;
+        conversationIds?: string[];
+        [key: string]: unknown;
+    } | null;
     readAt?: string | null;
     createdAt: string;
 }
@@ -22,16 +30,22 @@ export interface NotificationsResponse {
 }
 
 export const notificationTypeLabels: Record<string, string> = {
-    FIELD_VISIT_ASSIGNED: 'Visita atribuída',
+    FIELD_VISIT_ASSIGNED: 'Chamado atribuído',
     FIELD_VISIT_SCHEDULE_CHANGED: 'Agenda alterada',
-    FIELD_VISIT_STATUS_CHANGED: 'Status da visita',
+    FIELD_VISIT_STATUS_CHANGED: 'Status do chamado',
     TICKET_ASSIGNED: 'Chamado atribuído',
     CONVERSATION_TRANSFERRED: 'Conversa transferida',
     CONVERSATION_FALLBACK_ASSIGNED: 'Fallback automático',
+    ASSISTANT_TASK_DUE: 'Lembrete do mascote',
 };
 
 export function getNotificationTypeLabel(type: string) {
     return notificationTypeLabels[type] || 'Notificação';
+}
+
+export function isMascotNotification(notification: NotificationItem) {
+    return notification.type === 'ASSISTANT_TASK_DUE'
+        && notification.payload?.mascotAgentId === 'FOLLOWUP_MASCOT';
 }
 
 export function formatNotificationDate(value: string) {

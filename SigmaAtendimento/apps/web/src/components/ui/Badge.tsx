@@ -50,7 +50,7 @@ const statusMap: Record<TicketStatus, { label: string; tone: BadgeTone }> = {
     IN_PROGRESS:             { label: "Em andamento",    tone: "primary" },
     WAITING_CUSTOMER:        { label: "Aguard. cliente", tone: "warning" },
     WAITING_INTERNAL:        { label: "Aguard. interno", tone: "warning" },
-    SCHEDULED_FIELD_SERVICE: { label: "Visita agendada", tone: "primary" },
+    SCHEDULED_FIELD_SERVICE: { label: "Chamado agendado", tone: "primary" },
     RESOLVED:                { label: "Resolvido",       tone: "success" },
     CLOSED:                  { label: "Fechado",         tone: "neutral" },
     CANCELED:                { label: "Cancelado",       tone: "danger" },

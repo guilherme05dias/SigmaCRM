@@ -277,7 +277,7 @@ export default function Departments() {
 
                     <aside className="rounded-xl border border-border bg-surface p-5 shadow-card h-fit">
                         <h2 className="text-lg font-bold text-foreground">{editingId ? 'Editar departamento' : 'Novo departamento'}</h2>
-                        <p className="mt-1 text-sm text-muted-foreground">Departamentos organizam filas, tickets e responsáveis.</p>
+                        <p className="mt-1 text-sm text-muted-foreground">Departamentos organizam filas, Chamados e responsáveis.</p>
 
                         <form onSubmit={handleSubmit} className="mt-5 space-y-4">
                             <label className="block">

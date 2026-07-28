@@ -60,6 +60,8 @@ export interface WhatsAppHistorySyncOptions {
 export interface WhatsAppUnreadChat {
     phone: string;
     unreadCount: number;
+    name?: string | null;
+    lastMessageAt?: number | null;
 }
 
 export interface WhatsAppGroup {

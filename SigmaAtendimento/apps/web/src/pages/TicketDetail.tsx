@@ -60,7 +60,10 @@ interface TicketDetailData {
     customer?: { id: string; name: string; document?: string | null; businesses?: Array<{ id: string; name: string; cnpj: string }> } | null;
     assignedUser?: { id: string; name: string } | null;
     department?: { name: string } | null;
+    serviceTopicId?: string | null;
+    serviceTopic?: { id: string; name: string } | null;
     fieldService?: {
+        id?: string;
         serviceType?: ServiceType;
         status?: FieldVisitStatus;
         equipment?: string | null;
@@ -121,7 +124,7 @@ const statusLabels: Record<TicketStatus, string> = {
     IN_PROGRESS: 'Em andamento',
     WAITING_CUSTOMER: 'Aguardando cliente',
     WAITING_INTERNAL: 'Aguardando interno',
-    SCHEDULED_FIELD_SERVICE: 'Visita agendada',
+    SCHEDULED_FIELD_SERVICE: 'Chamado agendado',
     RESOLVED: 'Resolvido',
     CLOSED: 'Fechado',
     CANCELED: 'Cancelado',
@@ -525,6 +528,12 @@ export default function TicketDetail() {
                                         </p>
                                     </div>
                                     <div className="flex flex-wrap gap-2">
+                                        <Link
+                                            to={`/tasks?new=1&ticketId=${ticket.id}&contactId=${ticket.contact.id}${ticket.customer?.id ? `&customerId=${ticket.customer.id}` : ''}${ticket.serviceTopicId ? `&serviceTopicId=${ticket.serviceTopicId}` : ''}${ticket.fieldService?.id ? `&fieldServiceId=${ticket.fieldService.id}` : ''}`}
+                                            className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-border bg-surface px-3 text-sm font-semibold text-foreground transition-colors hover:bg-surface-alt"
+                                        >
+                                            Criar tarefa
+                                        </Link>
                                         <StatusBadge status={ticket.status} />
                                         <PriorityBadge priority={ticket.priority} />
                                     </div>
@@ -569,7 +578,7 @@ export default function TicketDetail() {
                                     </div>
 
                                     <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
-                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Visita técnica</h2>
+                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Agenda técnica</h2>
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <label>
                                                 <span className="mb-1 block text-sm font-medium text-foreground">Tipo</span>
@@ -580,7 +589,7 @@ export default function TicketDetail() {
                                                 </select>
                                             </label>
                                             <label>
-                                                <span className="mb-1 block text-sm font-medium text-foreground">Status da visita</span>
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Status do chamado</span>
                                                 <select value={form.fieldVisitStatus} onChange={(event) => setForm({ ...form, fieldVisitStatus: event.target.value as FieldVisitStatus })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30">
                                                     {Object.entries(fieldVisitStatusLabels).map(([value, label]) => (
                                                         <option key={value} value={value}>{label}</option>
@@ -603,7 +612,7 @@ export default function TicketDetail() {
                                                 <input type="datetime-local" value={form.scheduledAt} onChange={(event) => setForm({ ...form, scheduledAt: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
                                             </label>
                                             <label>
-                                                <span className="mb-1 block text-sm font-medium text-foreground">Endereço da visita</span>
+                                                <span className="mb-1 block text-sm font-medium text-foreground">Endereço do chamado</span>
                                                 <input value={form.visitAddress} onChange={(event) => setForm({ ...form, visitAddress: event.target.value })} className="h-11 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/30" />
                                             </label>
                                             <label>
@@ -631,7 +640,7 @@ export default function TicketDetail() {
                                     </div>
 
                                     <div className="rounded-2xl border border-border bg-surface p-6 shadow-card">
-                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Execução da visita</h2>
+                                        <h2 className="mb-4 text-lg font-semibold text-foreground">Execução do chamado</h2>
                                         <div className="grid gap-4 md:grid-cols-2">
                                             <label>
                                                 <span className="mb-1 block text-sm font-medium text-foreground">Tempo gasto (horas)</span>

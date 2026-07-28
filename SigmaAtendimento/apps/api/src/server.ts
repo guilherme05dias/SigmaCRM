@@ -14,10 +14,14 @@ import reportsRoutes from './routes/reports.routes';
 import settingsRoutes from './routes/settings.routes';
 import serviceTopicsRoutes from './routes/serviceTopics.routes';
 import notificationsRoutes from './routes/notifications.routes';
+import assistantRoutes from './routes/assistant.routes';
 import { createServer } from 'http';
 import { initSocket } from './socket';
 import { env, isOriginAllowed } from './config/env';
 import { startConversationFallbackWorker } from './services/conversationFallback.service';
+import { checkUazApiWebhookDatabaseHealth, logUazApiWebhookDatabaseHealth } from './services/uazApiWebhookHealth.service';
+import { getUazApiReconciliationHealth, startUazApiReconciliationWorker } from './services/uazApiReconciliation.service';
+import { startAssistantReminderWorker } from './services/assistantReminder.service';
 
 const app = express();
 
@@ -48,6 +52,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/service-topics', serviceTopicsRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/assistant', assistantRoutes);
 
 app.get('/', (_req, res) => {
     res.json({
@@ -70,8 +75,18 @@ app.get('/', (_req, res) => {
     });
 });
 
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date() });
+app.get('/health', async (_req, res) => {
+    const webhookDatabase = await checkUazApiWebhookDatabaseHealth();
+    const reconciliation = getUazApiReconciliationHealth();
+    const healthy = webhookDatabase.healthy && reconciliation.healthy;
+    res.status(healthy ? 200 : 503).json({
+        status: healthy ? 'ok' : 'degraded',
+        timestamp: new Date(),
+        checks: {
+            uazApiWebhookDatabase: webhookDatabase,
+            uazApiReconciliation: reconciliation,
+        },
+    });
 });
 
 app.get('/sigma-local-ca.crt', (_req, res) => {
@@ -84,6 +99,9 @@ app.get('/sigma-local-ca.crt', (_req, res) => {
 const httpServer = createServer(app);
 initSocket(httpServer);
 startConversationFallbackWorker();
+startUazApiReconciliationWorker();
+startAssistantReminderWorker();
+void logUazApiWebhookDatabaseHealth();
 
 httpServer.listen(env.port, () => {
     console.log(`Server API is running on http://localhost:${env.port}`);

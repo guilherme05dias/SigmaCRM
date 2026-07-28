@@ -116,6 +116,7 @@ const ticketInclude = {
     customer: { include: { businesses: { orderBy: { name: 'asc' as const } } } },
     assignedUser: true,
     department: true,
+    serviceTopic: true,
     fieldService: { include: { technician: true, scheduleChanges: { include: { changedByUser: true }, orderBy: { createdAt: 'desc' } } } },
     evaluation: true,
 } as const;

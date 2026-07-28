@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { ConversationStatus, FieldVisitStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
+import { ConversationCloseMode, ConversationStatus, FieldVisitStatus, MessageDirection, MessageType, TicketPriority, TicketStatus, ServiceType } from '@prisma/client';
 import { getIO, emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { canViewAll } from '../middlewares/authorization.middleware';
@@ -13,6 +13,7 @@ import { cancelConversationFallback } from '../services/conversationFallback.ser
 import { z } from 'zod';
 import { getWhatsAppProvider } from '../whatsapp';
 import { formatContactDisplayName } from '../lib/contactDisplayName';
+import { getConversationClosureBehavior } from '../services/conversationClosure.service';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -82,7 +83,8 @@ const CloseConversationSchema = z.object({
     otherTopicDescription: z.string().trim().optional().nullable(),
     notes: z.string().trim().optional().nullable(),
     fieldServiceRequired: z.boolean().optional(),
-    sendSatisfactionSurvey: z.boolean().optional().default(true),
+    closureMode: z.nativeEnum(ConversationCloseMode).optional(),
+    sendSatisfactionSurvey: z.boolean().optional(),
 });
 
 router.use(authMiddleware);
@@ -338,8 +340,21 @@ router.post('/conversations/:id/close', async (req, res) => {
             return res.status(400).json({ error: 'Selecione a empresa atendida' });
         }
 
+        const closeMode = parsed.data.closureMode
+            ?? (parsed.data.sendSatisfactionSurvey === false ? ConversationCloseMode.INACTIVITY : ConversationCloseMode.WITH_RATING);
+        if (closeMode === ConversationCloseMode.WITH_RATING && currentConversation.contact.includeInServiceReports === false) {
+            return res.status(400).json({ error: 'A avaliação está desativada para este contato. Escolha outro modo de encerramento.' });
+        }
+
+        const settings = await prisma.settings.findUnique({ where: { companyId } });
+        const closureBehavior = getConversationClosureBehavior({
+            closeMode,
+            includeInServiceReports: currentConversation.contact.includeInServiceReports !== false,
+            closingMessage: settings?.closingMessage,
+            inactivityClosingMessage: settings?.inactivityClosingMessage,
+        });
         const closedAt = new Date();
-        const shouldRequestSatisfaction = parsed.data.sendSatisfactionSurvey && currentConversation.contact.includeInServiceReports;
+        const shouldRequestSatisfaction = closureBehavior.shouldRequestSatisfaction;
         let totalHandleTimeSeconds = null;
         if (currentConversation.startedAt) {
             totalHandleTimeSeconds = Math.floor((closedAt.getTime() - currentConversation.startedAt.getTime()) / 1000);
@@ -368,6 +383,7 @@ router.post('/conversations/:id/close', async (req, res) => {
                     closeResult: parsed.data.result,
                     closeSummary: parsed.data.summary,
                     closeNotes: parsed.data.notes || null,
+                    closeMode,
                     ratingRequestedAt: shouldRequestSatisfaction ? closedAt : null,
                     serviceTopicId: serviceTopic.id,
                     otherTopicDescription: parsed.data.otherTopicDescription || null,
@@ -386,13 +402,13 @@ router.post('/conversations/:id/close', async (req, res) => {
                     systemName,
                     summary: parsed.data.summary,
                     observation: parsed.data.notes || null,
+                    closeMode,
                     closedAt,
                 },
             });
 
             await tx.whatsAppOutbox.deleteMany({ where: { companyId, conversationId } });
             await tx.whatsAppInboundEvent.deleteMany({ where: { companyId, conversationId } });
-            await tx.message.deleteMany({ where: { companyId, conversationId } });
 
             return updatedConversation;
         });
@@ -400,12 +416,7 @@ router.post('/conversations/:id/close', async (req, res) => {
 
         // Encerramento e pesquisa de satisfação: a resposta numérica do cliente
         // será registrada pelo webhook no atendimento recém-fechado.
-        const settings = await prisma.settings.findUnique({ where: { companyId } });
-        const satisfactionPrompt = 'De 1 a 10, qual nota você dá para este atendimento? Responda apenas com um número.';
-        const closingText = [
-            settings?.closingMessage?.trim(),
-            shouldRequestSatisfaction ? satisfactionPrompt : null,
-        ].filter(Boolean).join('\n\n');
+        const closingText = closureBehavior.closingText;
         if (closingText) {
             try {
                 await whatsappProvider.sendText({

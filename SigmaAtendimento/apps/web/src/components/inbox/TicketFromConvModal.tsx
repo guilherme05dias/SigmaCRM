@@ -86,7 +86,7 @@ export function TicketFromConvModal({
         <div ref={dialogRef} tabIndex={-1} className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="ticket-from-conv-title">
             <form onSubmit={submit} className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border bg-surface p-6 shadow-lifted">
                 <div className="mb-5">
-                    <h2 id="ticket-from-conv-title" className="text-xl font-semibold text-foreground">Criar chamado / visita</h2>
+                    <h2 id="ticket-from-conv-title" className="text-xl font-semibold text-foreground">Novo chamado</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
                         Vinculado a conversa com {contactName}. A data pode ficar como "Nao definido".
                     </p>
@@ -126,7 +126,7 @@ export function TicketFromConvModal({
                     </label>
 
                     <div className="rounded-xl border border-border bg-surface-alt p-4">
-                        <p className="mb-3 text-sm font-semibold text-foreground">Visita tecnica</p>
+                        <p className="mb-3 text-sm font-semibold text-foreground">Agenda técnica</p>
 
                         <div className="grid gap-4 md:grid-cols-2">
                             <label className="block space-y-1.5">
@@ -156,7 +156,7 @@ export function TicketFromConvModal({
                         </div>
 
                         <label className="mt-4 block space-y-1.5">
-                            <span className="block text-sm font-medium text-foreground">Endereco da visita</span>
+                            <span className="block text-sm font-medium text-foreground">Endereço do chamado</span>
                             <input
                                 value={visitAddress}
                                 onChange={(event) => setVisitAddress(event.target.value)}

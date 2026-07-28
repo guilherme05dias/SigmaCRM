@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useNavigate } from 'react-router-dom';
+import type { ReportsSummaryResponse } from '@sigma/shared';
 import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { Badge, PriorityBadge, StatusBadge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Icon, type IconName } from '../components/ui/Icon';
 import { Skeleton } from '../components/ui/Skeleton';
-import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { apiBlobRequest, apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { currentMonthReportDates } from '../lib/reportPresets';
 
 interface DashboardData {
     range: string;
@@ -94,46 +97,13 @@ function formatDateTime(value?: string | null) {
     });
 }
 
-function RankedList({ title, icon, items, labelKey }: { title: string; icon: IconName; items: Array<Record<string, string | number>>; labelKey: string }) {
-    const max = Math.max(...items.map((item) => Number(item.count)), 1);
-
-    return (
-        <section className="rounded-xl border border-border bg-surface p-6 shadow-card">
-            <div className="mb-5 flex items-center gap-2">
-                <Icon name={icon} className="size-5 text-primary" />
-                <h2 className="text-lg font-bold text-foreground">{title}</h2>
-            </div>
-
-            {items.length === 0 ? (
-                <EmptyState
-                    icon={icon}
-                    title="Sem dados desde o início"
-                    description="Aguarde novos registros da operação iniciada em 14/07/2026 às 08:00."
-                />
-            ) : (
-                <div className="space-y-4">
-                    {items.map((item) => (
-                        <div key={String(item[labelKey])} className="space-y-2">
-                            <div className="flex items-center justify-between gap-3 text-sm">
-                                <span className="truncate font-medium text-foreground">{item[labelKey]}</span>
-                                <span className="font-mono text-muted-foreground">{item.count}</span>
-                            </div>
-                            <div className="h-2 overflow-hidden rounded-full bg-surface-alt">
-                                <div className="h-full rounded-full bg-primary" style={{ width: `${(Number(item.count) / max) * 100}%` }} />
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </section>
-    );
-}
-
 export default function Dashboard() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
     const [data, setData] = useState<DashboardData | null>(null);
+    const [technicalSummary, setTechnicalSummary] = useState<ReportsSummaryResponse | null>(null);
     const [loading, setLoading] = useState(true);
+    const [exporting, setExporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [reloadKey, setReloadKey] = useState(0);
 
@@ -148,9 +118,18 @@ export default function Dashboard() {
         setLoading(true);
         setError(null);
 
-        apiRequest<DashboardData>('/api/reports/summary', { signal: controller.signal })
-            .then((nextData) => {
-                if (active) setData(nextData);
+        const period = currentMonthReportDates();
+        const summaryQuery = new URLSearchParams({ ...period, type: 'all' });
+
+        Promise.all([
+            apiRequest<DashboardData>('/api/reports/dashboard', { signal: controller.signal }),
+            apiRequest<ReportsSummaryResponse>(`/api/reports/summary?${summaryQuery}`, { signal: controller.signal }),
+        ])
+            .then(([nextData, nextSummary]) => {
+                if (active) {
+                    setData(nextData);
+                    setTechnicalSummary(nextSummary);
+                }
             })
             .catch((err) => {
                 if (controller.signal.aborted) {
@@ -173,10 +152,28 @@ export default function Dashboard() {
         };
     }, [navigate, reloadKey]);
 
-    const resolutionRate = useMemo(() => {
-        if (!data || data.metrics.totalTicketsOpened === 0) return 0;
-        return Math.round((data.metrics.totalTicketsResolved / data.metrics.totalTicketsOpened) * 100);
-    }, [data]);
+    const exportTechnicalReport = async () => {
+        const period = currentMonthReportDates();
+        const query = new URLSearchParams({ ...period, type: 'all' });
+        setExporting(true);
+        try {
+            const blob = await apiBlobRequest(`/api/reports/export.xlsx?${query}`);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `relatorio-tecnico-${period.from}-a-${period.to}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) {
+                setError(err instanceof Error ? err.message : 'Erro ao exportar o relatório em Excel.');
+            }
+        } finally {
+            setExporting(false);
+        }
+    };
 
     const hasOperationalData = useMemo(() => {
         if (!data) return false;
@@ -199,12 +196,12 @@ export default function Dashboard() {
     return (
         <div className="flex h-screen overflow-hidden bg-background text-foreground">
             <SigmaSidebarIcon user={user} onLogout={logout} />
-            <main className="flex-1 overflow-y-auto pb-[88px] md:pb-0">
+            <main className="min-w-0 flex-1 overflow-y-auto pb-[88px] md:pb-0">
                 <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 sm:p-6 lg:p-10">
                     <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                         <div>
                             <h1 className="text-2xl font-bold text-foreground sm:text-3xl">Visão operacional</h1>
-                            <p className="mt-1 max-w-2xl text-sm text-muted-foreground sm:text-base">Atendimentos, chamados e visitas que precisam de atenção.</p>
+                            <p className="mt-1 max-w-2xl text-sm text-muted-foreground sm:text-base">Atendimentos e Chamados que precisam de atenção.</p>
                         </div>
 
                         <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
@@ -212,8 +209,8 @@ export default function Dashboard() {
                                 <Icon name="schedule" className="size-5" />
                             </div>
                             <div>
-                                <p className="text-xs text-muted-foreground">Período dos indicadores</p>
-                                <p className="text-sm font-semibold text-foreground">Desde 14/07/2026 às 08:00</p>
+                                <p className="text-xs text-muted-foreground">Atualização</p>
+                                <p className="text-sm font-semibold text-foreground">Operação em tempo real</p>
                             </div>
                         </div>
                     </div>
@@ -238,35 +235,82 @@ export default function Dashboard() {
                         <EmptyState
                             icon="dashboard"
                             title="Sem dados operacionais"
-                            description="Ainda não há conversas, mensagens ou chamados registrados hoje desde 08:00."
+                            description="Ainda não há Atendimentos ou Chamados ativos na operação."
                         />
                     ) : data ? (
                         <>
                             <section aria-labelledby="operacao-agora" className="space-y-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <h2 id="operacao-agora" className="text-lg font-bold text-foreground">Operação agora</h2>
-                                    <span className="text-xs text-muted-foreground">Desde 14/07/2026 às 08:00</span>
+                                    <span className="text-xs text-muted-foreground">Operação em tempo real</span>
                                 </div>
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                                     <Kpi title="Fila atual" value={data.metrics.queueCount} detail="Clientes aguardando atendimento" icon="forum" tone="bg-warning-soft text-warning-fg" />
                                     <Kpi title="Ativos" value={data.metrics.activeConversations} detail="Atendimentos em andamento" icon="chat" tone="bg-primary/10 text-primary" />
-                                    <Kpi title="Visitas hoje" value={data.metrics.visitsToday} detail="Agendadas para hoje" icon="engineering" tone="bg-info-soft text-info-fg" />
-                                    <Kpi title="Visitas abertas" value={data.metrics.pendingVisits} detail="Pendentes, agendadas ou em campo" icon="schedule" tone="bg-surface-alt text-muted-foreground" />
+                                    <Kpi title="Chamados hoje" value={data.metrics.visitsToday} detail="Agendados para hoje" icon="engineering" tone="bg-info-soft text-info-fg" />
+                                    <Kpi title="Chamados abertos" value={data.metrics.pendingVisits} detail="Pendentes, agendados ou em campo" icon="schedule" tone="bg-surface-alt text-muted-foreground" />
                                 </div>
                             </section>
 
-                            <section aria-label="Resumo do período" className="grid grid-cols-2 overflow-hidden rounded-xl border border-border bg-surface sm:grid-cols-4">
-                                {[
-                                    ['Conversas', data.metrics.totalConversationsOpened],
-                                    ['Mensagens', data.metrics.totalMessages],
-                                    ['Chamados', data.metrics.totalTicketsOpened],
-                                    ['Resolução', `${resolutionRate}%`],
-                                ].map(([label, value], index) => (
-                                    <div key={label} className={`px-4 py-4 sm:px-5 ${index % 2 ? 'border-l border-border' : ''} ${index >= 2 ? 'border-t border-border sm:border-t-0' : ''} ${index > 0 ? 'sm:border-l sm:border-border' : ''}`}>
-                                        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-                                        <p className="mt-1 text-xl font-bold text-foreground">{value}</p>
+                            <section aria-labelledby="atividade-tecnica" className="overflow-hidden rounded-xl border border-border bg-surface shadow-card">
+                                <div className="flex flex-col gap-4 border-b border-border px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <Icon name="engineering" className="size-5 text-primary" />
+                                            <h2 id="atividade-tecnica" className="text-lg font-bold text-foreground">Atendimentos e visitas por técnico</h2>
+                                        </div>
+                                        <p className="mt-1 text-sm text-muted-foreground">Mês atual · clientes, datas, sistema/produto e observações disponíveis nos detalhes.</p>
                                     </div>
-                                ))}
+                                    <div className="flex flex-wrap gap-2">
+                                        <Link to="/reports" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-border bg-surface px-4 text-sm font-medium tracking-wide text-foreground transition-colors hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
+                                            Ver detalhes e clientes
+                                        </Link>
+                                        <Button onClick={exportTechnicalReport} loading={exporting}>
+                                            <Icon name="bar_chart" className="size-4" /> Exportar Excel
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {!technicalSummary || technicalSummary.technicians.length === 0 ? (
+                                    <div className="p-5">
+                                        <EmptyState icon="engineering" title="Sem atividade técnica no mês" description="Os Atendimentos e Chamados atribuídos aos técnicos aparecerão aqui." />
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full min-w-[680px] text-left text-sm">
+                                            <thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground">
+                                                <tr>
+                                                    <th className="px-5 py-3">Técnico</th>
+                                                    <th className="px-5 py-3">Atendimentos</th>
+                                                    <th className="px-5 py-3">Chamados / Visitas</th>
+                                                    <th className="px-5 py-3">Total</th>
+                                                    <th className="px-5 py-3 text-right">Clientes</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border">
+                                                {technicalSummary.technicians.map((item) => {
+                                                    const reportParams = new URLSearchParams({
+                                                        from: technicalSummary.filters.from,
+                                                        to: technicalSummary.filters.to,
+                                                        type: 'all',
+                                                        responsibleUserId: item.userId,
+                                                    });
+                                                    return (
+                                                        <tr key={item.userId} className="hover:bg-surface-alt/60">
+                                                            <td className="px-5 py-4 font-semibold text-foreground">{item.userName}</td>
+                                                            <td className="px-5 py-4 font-mono">{item.attendanceCount}</td>
+                                                            <td className="px-5 py-4 font-mono">{item.ticketCount}</td>
+                                                            <td className="px-5 py-4 font-mono font-bold text-primary">{item.totalCount}</td>
+                                                            <td className="px-5 py-3 text-right">
+                                                                <Link to={`/reports?${reportParams}`} className="inline-flex min-h-11 items-center rounded-lg px-3 font-semibold text-primary hover:bg-primary/10">Listar clientes</Link>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
                             </section>
 
                             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -276,7 +320,7 @@ export default function Dashboard() {
                                             <Icon name="chat" className="size-5 text-primary" />
                                             <h2 className="text-lg font-bold text-foreground">Últimos atendimentos</h2>
                                         </div>
-                                        <Link to="/inbox" className="text-sm font-semibold text-primary hover:text-primary-700">Ver inbox</Link>
+                                        <Link to="/inbox" className="text-sm font-semibold text-primary hover:text-primary-700">Ver Atendimentos</Link>
                                     </div>
 
                                     {data.metrics.recentConversations.length === 0 ? (
@@ -310,13 +354,13 @@ export default function Dashboard() {
                                     <div className="mb-5 flex items-center justify-between gap-3">
                                         <div className="flex items-center gap-2">
                                             <Icon name="engineering" className="size-5 text-primary" />
-                                            <h2 className="text-lg font-bold text-foreground">Últimas visitas</h2>
+                                            <h2 className="text-lg font-bold text-foreground">Últimos Chamados</h2>
                                         </div>
                                         <Link to="/visits" className="text-sm font-semibold text-primary hover:text-primary-700">Ver painel</Link>
                                     </div>
 
                                     {data.metrics.recentVisits.length === 0 ? (
-                                        <EmptyState icon="engineering" title="Sem visitas recentes" description="As visitas abertas a partir dos atendimentos aparecerão aqui." />
+                                        <EmptyState icon="engineering" title="Sem Chamados recentes" description="Os Chamados abertos a partir dos Atendimentos aparecerão aqui." />
                                     ) : (
                                         <div className="space-y-3">
                                             {data.metrics.recentVisits.map((visit) => {
@@ -345,10 +389,6 @@ export default function Dashboard() {
                                 </section>
                             </div>
 
-                            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                                <RankedList title="Conversas por departamento" icon="groups" items={data.metrics.conversationsByDepartment} labelKey="department" />
-                                <RankedList title="Chamados por tecnico" icon="engineering" items={data.metrics.ticketsByTechnician} labelKey="technician" />
-                            </div>
                         </>
                     ) : null}
                 </div>

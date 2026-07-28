@@ -16,6 +16,7 @@ import { rateLimit } from '../middlewares/rateLimit.middleware';
 import { scheduleConversationFallback } from '../services/conversationFallback.service';
 import { invalidateProviderUnreadCounts } from '../services/providerUnread.service';
 import { normalizePhone, phoneAliases } from '../lib/phone';
+import { getDefaultDepartmentId } from '../services/defaultDepartment.service';
 
 const router = Router();
 const whatsappProvider = getWhatsAppProvider();
@@ -23,6 +24,8 @@ const muriloApiBaseUrl = env.muriloApiBaseUrl;
 
 type ParsedWebhook = Awaited<ReturnType<typeof whatsappProvider.parseIncoming>>;
 type ParsedWebhookMessage = ParsedWebhook['messages'][number];
+
+class ConversationClosedDuringWebhookError extends Error {}
 
 function isMessageMutation(message: ParsedWebhookMessage) {
     return message.event === 'DELETE' || message.event === 'EDIT' || message.event === 'REACTION';
@@ -180,6 +183,9 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
             : getCompanyId(req);
         const chatLimit = Math.max(1, Math.min(Number(req.body?.chatLimit || req.query.chatLimit || 500), 500));
         const messageLimit = Math.max(1, Math.min(Number(req.body?.messageLimit || req.query.messageLimit || 1000), 1000));
+        const targetConversationId = typeof req.body?.conversationId === 'string'
+            ? req.body.conversationId.trim()
+            : '';
         const chats = await whatsappProvider.syncHistory({
             sessionId: req.params.sessionId,
             chatLimit,
@@ -230,13 +236,25 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
             const sortedMessages = [...chat.messages].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             const firstMessageAt = fromWhatsAppTimestamp(sortedMessages[0]?.timestamp);
             const lastMessageAt = fromWhatsAppTimestamp(chat.lastMessageAt) || fromWhatsAppTimestamp(sortedMessages[sortedMessages.length - 1]?.timestamp) || new Date();
-            let conversation = await prisma.conversation.findFirst({
-                where: {
-                    companyId,
-                    contactId: contact.id,
-                },
-                orderBy: { updatedAt: 'desc' },
-            });
+            let conversation = targetConversationId
+                ? await prisma.conversation.findFirst({
+                    where: {
+                        id: targetConversationId,
+                        companyId,
+                        contactId: contact.id,
+                    },
+                })
+                : await prisma.conversation.findFirst({
+                    where: {
+                        companyId,
+                        contactId: contact.id,
+                    },
+                    orderBy: { updatedAt: 'desc' },
+                });
+
+            if (targetConversationId && !conversation) {
+                return res.status(404).json({ error: 'Conversa selecionada não pertence a este contato.' });
+            }
 
             if (!conversation) {
                 conversation = await prisma.conversation.create({
@@ -266,11 +284,17 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
                 });
             }
 
-            // Conversas históricas já encerradas entram apenas como referência
-            // operacional; o conteúdo não volta a ser persistido após a retenção.
-            if (conversation.status === 'CLOSED') continue;
+            const historyMessages = conversation.status === 'CLOSED' && conversation.startedAt && conversation.closedAt
+                ? sortedMessages.filter((message) => {
+                    const occurredAt = fromWhatsAppTimestamp(message.timestamp);
+                    if (!occurredAt) return false;
+                    const toleranceMs = 5 * 60 * 1000;
+                    return occurredAt.getTime() >= conversation.startedAt!.getTime() - toleranceMs
+                        && occurredAt.getTime() <= conversation.closedAt!.getTime() + toleranceMs;
+                })
+                : sortedMessages;
 
-            const messageIds = sortedMessages
+            const messageIds = historyMessages
                 .map((message, index) => message.waMessageId || `history_${phone}_${message.timestamp || index}_${message.direction}`)
                 .filter(Boolean);
             const existingMessages = messageIds.length
@@ -285,7 +309,7 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
                 : [];
             const existingMessageIds = new Set(existingMessages.map((message) => message.waMessageId).filter(Boolean));
 
-            for (const [index, message] of sortedMessages.entries()) {
+            for (const [index, message] of historyMessages.entries()) {
                 const waMessageId = message.waMessageId || `history_${phone}_${message.timestamp || index}_${message.direction}`;
                 if (existingMessageIds.has(waMessageId)) continue;
                 const messageCreatedAt = fromWhatsAppTimestamp(message.timestamp);
@@ -357,10 +381,11 @@ router.post('/sessions/:sessionId/sync-history', internalOrAdminAuth, async (req
                 emitToCompany(updatedConversation.companyId, 'conversation:updated', updatedConversation);
             }
 
-            if (requestOlder && whatsappProvider.requestHistorySync) {
+            const oldestProviderMessageId = historyMessages[0]?.waMessageId;
+            if (requestOlder && conversation.status !== 'CLOSED' && oldestProviderMessageId && whatsappProvider.requestHistorySync) {
                 await whatsappProvider.requestHistorySync({
                     phone,
-                    messageId: sortedMessages[0]?.waMessageId || undefined,
+                    messageId: oldestProviderMessageId,
                     count: 100,
                 });
                 historyRequests += 1;
@@ -781,11 +806,13 @@ async function processWebhookPayload(parsed: ParsedWebhook, rawPayload: any) {
     let createdMessageCount = 0;
     if (!conversation) {
         if (containsOnlyMessageMutations) return;
+        const defaultDepartmentId = isHistoryEvent ? null : await getDefaultDepartmentId(companyId);
         try {
             conversation = await prisma.conversation.create({
                 data: {
                     companyId,
                     contactId: contact.id,
+                    departmentId: defaultDepartmentId,
                     status: isHistoryEvent ? 'CLOSED' : 'OPEN',
                     startedAt: firstProviderAt || new Date(),
                     closedAt: isHistoryEvent ? (lastProviderAt || new Date()) : null,
@@ -879,37 +906,84 @@ async function processWebhookPayload(parsed: ParsedWebhook, rawPayload: any) {
 
         // INBOUND — reserva do evento, mensagem e contagem precisam ser atômicas.
         // Se qualquer etapa falhar, nenhuma delas fica parcialmente gravada.
+        const persistInbound = (targetConversationId: string, targetReplyToMessageId: string | null) => prisma.$transaction(async (tx) => {
+            let unreadCount: number | null = null;
+            if (!isHistoryEvent) {
+                // Também funciona como lock da conversa. Se o encerramento venceu a
+                // corrida, a condição falha e a mensagem é desviada a um novo atendimento.
+                const claimedConversation = await tx.conversation.updateMany({
+                    where: { id: targetConversationId, companyId, status: { not: 'CLOSED' } },
+                    data: { unreadCount: { increment: 1 } },
+                });
+                if (claimedConversation.count !== 1) throw new ConversationClosedDuringWebhookError();
+                const unreadConversation = await tx.conversation.findUnique({
+                    where: { id: targetConversationId },
+                    select: { unreadCount: true },
+                });
+                unreadCount = unreadConversation?.unreadCount ?? null;
+            }
+
+            const inboundEvent = await tx.whatsAppInboundEvent.create({
+                data: {
+                    companyId,
+                    provider: currentWhatsAppProvider(),
+                    providerMessageId: msg.waMessageId || stableInboundMessageId(rawPayload, phone, msg),
+                    fromPhone: phone,
+                    conversationId: targetConversationId,
+                    rawPayload,
+                },
+            });
+            const message = await tx.message.create({
+                data: { companyId, conversationId: targetConversationId, direction: 'INBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId, replyToMessageId: targetReplyToMessageId, createdAt: fromWhatsAppTimestamp(msg.timestamp) },
+                include: { replyToMessage: true },
+            });
+            return { inboundEvent, message, unreadCount };
+        });
+
         let inboundResult;
         try {
-            inboundResult = await prisma.$transaction(async (tx) => {
-                const inboundEvent = await tx.whatsAppInboundEvent.create({
-                    data: {
-                        companyId,
-                        provider: currentWhatsAppProvider(),
-                        providerMessageId: msg.waMessageId || stableInboundMessageId(rawPayload, phone, msg),
-                        fromPhone: phone,
-                        conversationId: conversation.id,
-                        rawPayload,
-                    },
-                });
-                const message = await tx.message.create({
-                    data: { companyId, conversationId: conversation.id, direction: 'INBOUND', type: msg.type, body: msg.body, mediaUrl: msg.mediaUrl, waMessageId: msg.waMessageId, replyToMessageId: replyToMessage?.id, createdAt: fromWhatsAppTimestamp(msg.timestamp) },
-                    include: { replyToMessage: true },
-                });
-                let unreadCount: number | null = null;
-                if (!isHistoryEvent) {
-                    const unreadConversation = await tx.conversation.update({
-                        where: { id: conversation.id },
-                        data: { unreadCount: { increment: 1 } },
-                        select: { unreadCount: true },
-                    });
-                    unreadCount = unreadConversation.unreadCount;
-                }
-                return { inboundEvent, message, unreadCount };
-            });
+            inboundResult = await persistInbound(conversation.id, replyToMessage?.id || null);
         } catch (error: any) {
-            if (error?.code === 'P2002') continue; // mensagem duplicada
-            throw error;
+            if (error instanceof ConversationClosedDuringWebhookError) {
+                let replacement = await prisma.conversation.findFirst({
+                    where: { companyId, contactId: contact.id, status: { not: 'CLOSED' } },
+                    orderBy: { createdAt: 'desc' },
+                });
+                let replacementCreated = false;
+                if (!replacement) {
+                    try {
+                        const defaultDepartmentId = await getDefaultDepartmentId(companyId);
+                        replacement = await prisma.conversation.create({
+                            data: {
+                                companyId,
+                                contactId: contact.id,
+                                departmentId: defaultDepartmentId,
+                                status: 'OPEN',
+                                startedAt: fromWhatsAppTimestamp(msg.timestamp) || new Date(),
+                            },
+                        });
+                        replacementCreated = true;
+                    } catch (createError: any) {
+                        if (createError?.code !== 'P2002') throw createError;
+                        replacement = await prisma.conversation.findFirst({
+                            where: { companyId, contactId: contact.id, status: { not: 'CLOSED' } },
+                            orderBy: { createdAt: 'desc' },
+                        });
+                        if (!replacement) throw createError;
+                    }
+                }
+                conversation = replacement;
+                isNewConversation = isNewConversation || replacementCreated;
+                try {
+                    inboundResult = await persistInbound(conversation.id, null);
+                } catch (retryError: any) {
+                    if (retryError?.code === 'P2002') continue;
+                    throw retryError;
+                }
+            } else {
+                if (error?.code === 'P2002') continue; // mensagem duplicada
+                throw error;
+            }
         }
         const { inboundEvent, message, unreadCount } = inboundResult;
         createdMessageCount += 1;

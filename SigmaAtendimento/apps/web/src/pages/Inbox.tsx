@@ -40,10 +40,11 @@ interface CloseConversationPayload {
     result: string;
     summary: string;
     serviceTopicId: string;
+    customerBusinessId?: string | null;
     otherTopicDescription?: string | null;
     notes?: string | null;
     fieldServiceRequired?: boolean;
-    sendSatisfactionSurvey?: boolean;
+    closureMode: 'WITH_RATING' | 'INACTIVITY' | 'SILENT';
 }
 
 type ManagementScope = 'mine' | 'all';
@@ -129,6 +130,8 @@ export default function Inbox() {
     const [messages, setMessages] = useState<Message[]>([]);
     const [departments, setDepartments] = useState<DepartmentOption[]>([]);
     const [serviceTopics, setServiceTopics] = useState<ServiceTopicOption[]>([]);
+    const [isLoadingServiceTopics, setIsLoadingServiceTopics] = useState(true);
+    const [serviceTopicsError, setServiceTopicsError] = useState<string | null>(null);
     const [technicians, setTechnicians] = useState<Array<{ id: string; name: string; active?: boolean }>>([]);
     const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
     const [messageCursor, setMessageCursor] = useState<string | null>(null);
@@ -136,12 +139,13 @@ export default function Inbox() {
     const [isRefreshingInbox, setIsRefreshingInbox] = useState(false);
     const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
     const [activeTab, setActiveTab] = useState<'chats' | 'fila' | 'historico' | 'contatos'>('chats');
-    const [managementScope, setManagementScope] = useState<ManagementScope>('mine');
+    const [managementScope, setManagementScope] = useState<ManagementScope>('all');
     const [unauthorized, setUnauthorized] = useState(false);
     const redirectingRef = useRef(false);
     const selectedConvIdRef = useRef<string | null>(null);
     const conversationsRef = useRef<Conversation[]>([]);
     const isRefreshingRef = useRef(false);
+    const serviceTopicsRequestIdRef = useRef(0);
     const loadConversationsRef = useRef<((options?: { silent?: boolean }) => void) | null>(null);
     const loadMessagesRef = useRef<((id: string, options?: { cursor?: string | null; prepend?: boolean; silent?: boolean }) => void) | null>(null);
 
@@ -208,13 +212,40 @@ export default function Inbox() {
     };
     loadConversationsRef.current = loadConversations;
 
+    const loadServiceTopics = async () => {
+        const requestId = ++serviceTopicsRequestIdRef.current;
+        setIsLoadingServiceTopics(true);
+        setServiceTopicsError(null);
+
+        try {
+            const data = await apiRequest<ServiceTopicOption[]>('/api/service-topics');
+            if (requestId !== serviceTopicsRequestIdRef.current) return;
+            setServiceTopics(Array.isArray(data) ? data : []);
+        } catch (err) {
+            if (requestId !== serviceTopicsRequestIdRef.current) return;
+            if (redirectOnUnauthorized(err, navigate)) {
+                setUnauthorized(true);
+                return;
+            }
+
+            console.error(err);
+            setServiceTopicsError(
+                err instanceof Error
+                    ? err.message
+                    : 'Não foi possível carregar os sistemas e assuntos.',
+            );
+        } finally {
+            if (requestId === serviceTopicsRequestIdRef.current) {
+                setIsLoadingServiceTopics(false);
+            }
+        }
+    };
+
     useEffect(() => {
         apiRequest<DepartmentOption[]>('/api/departments')
             .then((data) => setDepartments(Array.isArray(data) ? data : []))
             .catch(handleApiError);
-        apiRequest<ServiceTopicOption[]>('/api/service-topics')
-            .then((data) => setServiceTopics(Array.isArray(data) ? data : []))
-            .catch(handleApiError);
+        void loadServiceTopics();
         apiRequest<UserOption[]>('/api/users')
             .then((data) => {
                 const activeTechnicians = Array.isArray(data)
@@ -592,7 +623,13 @@ export default function Inbox() {
         try {
             const summary = await apiRequest<{ importedMessages: number; historyRequests?: number }>(`/api/whatsapp/sessions/default/sync-history`, {
                 method: 'POST',
-                body: JSON.stringify({ phone: selectedConv.contact.phone, chatLimit: 1, messageLimit: 1000, requestOlder: true }),
+                body: JSON.stringify({
+                    phone: selectedConv.contact.phone,
+                    conversationId: selectedConv.id,
+                    chatLimit: 1,
+                    messageLimit: 1000,
+                    requestOlder: true,
+                }),
             });
             await Promise.all([loadConversations(), loadMessages(selectedConv.id)]);
             showToast({
@@ -634,7 +671,11 @@ export default function Inbox() {
             setSelectedConvId(null);
             showToast({
                 title: 'Conversa encerrada',
-                description: 'O atendimento foi enviado para o historico.',
+                description: payload.closureMode === 'WITH_RATING'
+                    ? 'Mensagem de encerramento e avaliação enviadas ao cliente.'
+                    : payload.closureMode === 'INACTIVITY'
+                        ? 'Mensagem de encerramento enviada sem solicitar avaliação.'
+                        : 'Atendimento fechado sem enviar mensagem ao cliente.',
                 variant: 'success',
             });
         } catch (err) {
@@ -765,6 +806,9 @@ export default function Inbox() {
                     createTicketError={createTicketError}
                     departments={departments}
                     serviceTopics={serviceTopics}
+                    isLoadingServiceTopics={isLoadingServiceTopics}
+                    serviceTopicsError={serviceTopicsError}
+                    onReloadServiceTopics={loadServiceTopics}
                     technicians={technicians}
                     hasMore={hasMoreMessages}
                     onLoadMore={loadMoreMessages}

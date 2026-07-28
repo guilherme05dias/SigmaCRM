@@ -4,7 +4,10 @@ import {
     UserPlus, Pencil, Trash2, Clock, Smartphone, Eye, LogIn, Ban, ShieldCheck,
     UserCog, BadgeCheck, CheckCircle2, Smile, CircleAlert, QrCode, Save, Info,
     ListFilter, Hammer, Network, Mail, Lock, Sun, Moon, ChevronDown, Reply, SmilePlus, Menu, X,
-    History, TicketPlus, CircleX, ArrowRightLeft, ArrowLeft, UserRoundCheck, type LucideIcon,
+    History, TicketPlus, CircleX, ArrowRightLeft, ArrowLeft, ArrowDown, UserRoundCheck,
+    Bot, ListTodo, Plus, Sparkles, CalendarDays, Columns3, Check, Circle,
+    ExternalLink, UserRound, CalendarClock, SlidersHorizontal, RefreshCw,
+    ClipboardList, ChevronLeft, ChevronRight, MoreHorizontal, type LucideIcon,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -69,8 +72,26 @@ const registry = {
     call_end: CircleX,
     swap_horiz: ArrowRightLeft,
     arrow_back: ArrowLeft,
+    arrow_down: ArrowDown,
     person_check: UserRoundCheck,
     close: X,
+    assistant: Bot,
+    task_list: ListTodo,
+    add: Plus,
+    auto_awesome: Sparkles,
+    calendar_month: CalendarDays,
+    view_kanban: Columns3,
+    check: Check,
+    radio_button_unchecked: Circle,
+    open_in_new: ExternalLink,
+    person: UserRound,
+    event: CalendarClock,
+    tune: SlidersHorizontal,
+    refresh: RefreshCw,
+    assignment: ClipboardList,
+    chevron_left: ChevronLeft,
+    chevron_right: ChevronRight,
+    more_horiz: MoreHorizontal,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof registry;

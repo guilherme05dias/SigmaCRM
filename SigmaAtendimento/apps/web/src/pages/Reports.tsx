@@ -1,363 +1,312 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { SigmaTopbar } from '../components/sigma/SigmaTopbar';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import type {
+    AttendanceReportRow,
+    CursorPage,
+    ReportFilters,
+    ReportsSummaryResponse,
+    ReportType,
+    TicketReportRow,
+} from '@sigma/shared';
+import { SigmaSidebarIcon } from '../components/sigma/SigmaSidebarIcon';
 import { SigmaMetricCard } from '../components/sigma/SigmaMetricCard';
+import { Badge } from '../components/ui/Badge';
+import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Icon } from '../components/ui/Icon';
 import { Skeleton } from '../components/ui/Skeleton';
-import { apiRequest, redirectOnUnauthorized } from '../lib/api';
+import { apiBlobRequest, apiRequest, redirectOnUnauthorized } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { contactDisplayName } from '../components/inbox/contactDisplayName';
+import { currentMonthReportDates, rollingReportDates } from '../lib/reportPresets';
 
-interface MetricsData {
-    range: string;
-    startDate: string;
-    endDate: string;
-    metrics: {
-        totalConversationsOpened: number;
-        totalMessages: number;
-        totalTicketsOpened: number;
-        totalTicketsResolved: number;
-        conversationsByDepartment: { department: string; count: number }[];
-        ticketsByTechnician: { technician: string; count: number }[];
-        csat: { average: number | null; count: number };
-        attendantRatings: {
-            userId: string;
-            userName: string;
-            average: number;
-            count: number;
-        }[];
-    };
+type Option = { id: string; name: string; role?: string; active?: boolean };
+
+const attendanceStatusLabels: Record<string, string> = { OPEN: 'Na fila', ASSIGNED: 'Em atendimento', CLOSED: 'Encerrado' };
+const ticketStatusLabels: Record<string, string> = {
+    NEW: 'Novo', QUEUED: 'Na fila', IN_PROGRESS: 'Em andamento', WAITING_CUSTOMER: 'Aguardando cliente',
+    WAITING_INTERNAL: 'Aguardando interno', SCHEDULED_FIELD_SERVICE: 'Agendado', RESOLVED: 'Resolvido',
+    CLOSED: 'Fechado', CANCELED: 'Cancelado', PENDING: 'Pendente', SCHEDULED: 'Agendado', COMPLETED: 'Concluído',
+};
+
+function initialDates() {
+    return currentMonthReportDates();
 }
 
-interface ConversationReportRecord {
-    id: string;
-    customerName: string;
-    businessName: string | null;
-    businessCnpj: string | null;
-    systemName: string;
-    summary: string;
-    rating: number | null;
-    observation: string | null;
-    closedAt: string;
+function formatDuration(seconds: number | null) {
+    if (seconds === null) return '—';
+    if (seconds < 60) return `${seconds}s`;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return hours ? `${hours}h ${minutes}min` : `${minutes}min`;
 }
 
-function formatRating(value: number | null) {
-    if (value === null) return '—';
-    return value.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+function formatAverage(metric: { value: number | null; sampleSize: number }, suffix = '') {
+    if (metric.value === null) return '—';
+    return `${metric.value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}${suffix}`;
 }
 
-function formatCnpj(value: string | null) {
-    if (!value) return null;
-    return value.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+function queryFor(filters: ReportFilters) {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
+    return query;
+}
+
+function Breakdown({ title, values }: { title: string; values: Array<{ id: string | null; label: string; count: number }> }) {
+    return (
+        <section className="rounded-2xl border border-border bg-surface p-5">
+            <h3 className="text-base font-semibold text-foreground">{title}</h3>
+            {values.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">Sem dados no período.</p> : (
+                <div className="mt-4 space-y-2">
+                    {values.slice(0, 8).map((item) => (
+                        <div key={item.id ?? item.label} className="flex items-center justify-between gap-3 rounded-lg bg-surface-alt px-3 py-2">
+                            <span className="truncate text-sm text-foreground">{ticketStatusLabels[item.label] ?? item.label}</span>
+                            <span className="font-mono text-sm font-semibold text-foreground">{item.count}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </section>
+    );
+}
+
+function CsatBreakdown({ values }: { values: ReportsSummaryResponse['attendance']['csatByAttendant'] }) {
+    return (
+        <section className="rounded-2xl border border-border bg-surface p-5">
+            <h3 className="text-base font-semibold text-foreground">CSAT por atendente</h3>
+            {values.length === 0 ? <p className="mt-4 text-sm text-muted-foreground">Sem avaliações no período.</p> : (
+                <div className="mt-4 space-y-2">
+                    {values.slice(0, 8).map((item) => (
+                        <div key={item.id ?? item.label} className="flex items-center justify-between gap-3 rounded-lg bg-surface-alt px-3 py-2">
+                            <span className="truncate text-sm text-foreground">{item.label}</span>
+                            <span className="font-mono text-sm font-semibold text-foreground">{item.average.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}/10 <span className="font-sans text-xs font-normal text-muted-foreground">({item.count})</span></span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </section>
+    );
 }
 
 export default function Reports() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
-    const [data, setData] = useState<MetricsData | null>(null);
-    const [records, setRecords] = useState<ConversationReportRecord[]>([]);
+    const canViewAll = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+    const defaults = useMemo(initialDates, []);
+    const [searchParams, setSearchParams] = useSearchParams();
+    const filters = useMemo<ReportFilters>(() => ({
+        from: searchParams.get('from') || defaults.from,
+        to: searchParams.get('to') || defaults.to,
+        type: (searchParams.get('type') as ReportType) || 'all',
+        departmentId: searchParams.get('departmentId') || undefined,
+        responsibleUserId: searchParams.get('responsibleUserId') || undefined,
+        attendanceStatus: (searchParams.get('attendanceStatus') as ReportFilters['attendanceStatus']) || undefined,
+        ticketStatus: searchParams.get('ticketStatus') || undefined,
+        origin: (searchParams.get('origin') as ReportFilters['origin']) || undefined,
+    }), [defaults, searchParams]);
+
+    const [summary, setSummary] = useState<ReportsSummaryResponse | null>(null);
+    const [attendances, setAttendances] = useState<AttendanceReportRow[]>([]);
+    const [tickets, setTickets] = useState<TicketReportRow[]>([]);
+    const [attendanceCursor, setAttendanceCursor] = useState<string | null>(null);
+    const [ticketCursor, setTicketCursor] = useState<string | null>(null);
+    const [departments, setDepartments] = useState<Option[]>([]);
+    const [users, setUsers] = useState<Option[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [exporting, setExporting] = useState<'xlsx' | 'csv' | null>(null);
     const [error, setError] = useState<string | null>(null);
 
-    const hasOperationalData = data
-        ? data.metrics.totalConversationsOpened > 0
-            || data.metrics.totalMessages > 0
-            || data.metrics.totalTicketsOpened > 0
-            || data.metrics.totalTicketsResolved > 0
-            || data.metrics.conversationsByDepartment.length > 0
-            || data.metrics.ticketsByTechnician.length > 0
-            || data.metrics.attendantRatings.length > 0
-            || records.length > 0
-        : false;
+    const updateFilters = useCallback((changes: Partial<ReportFilters>) => {
+        const next = { ...filters, ...changes };
+        if (changes.type === 'attendance') {
+            next.ticketStatus = undefined;
+            next.origin = undefined;
+        } else if (changes.type === 'ticket') next.attendanceStatus = undefined;
+        setSearchParams(queryFor(next), { replace: true });
+    }, [filters, setSearchParams]);
 
     useEffect(() => {
-        setLoading(true);
-        setError(null);
-        Promise.all([
-            apiRequest<MetricsData>('/api/reports/summary'),
-            apiRequest<{ records: ConversationReportRecord[] }>('/api/reports/records'),
-        ])
-            .then(([resData, recordsData]) => {
-                setData(resData);
-                setRecords(recordsData.records);
+        Promise.all([apiRequest<Option[]>('/api/departments'), apiRequest<Option[]>('/api/users')])
+            .then(([departmentData, userData]) => {
+                setDepartments(departmentData.filter((item: Option & { active?: boolean }) => item.active !== false));
+                setUsers(userData.filter((item) => item.active !== false));
             })
-            .catch(err => {
-                if (!redirectOnUnauthorized(err, navigate)) {
-                    setError(err instanceof Error ? err.message : 'Erro ao carregar relatórios.');
-                    setData(null);
-                    setRecords([]);
-                }
-            })
-            .finally(() => setLoading(false));
+            .catch((err) => { if (!redirectOnUnauthorized(err, navigate)) console.error(err); });
     }, [navigate]);
 
+    useEffect(() => {
+        let active = true;
+        const query = queryFor(filters);
+        setLoading(true);
+        setError(null);
+        const requests: Promise<unknown>[] = [apiRequest<ReportsSummaryResponse>(`/api/reports/summary?${query}`)];
+        if (filters.type !== 'ticket') {
+            const attendanceQuery = new URLSearchParams(query);
+            attendanceQuery.set('type', 'attendance'); attendanceQuery.set('take', '25');
+            requests.push(apiRequest<CursorPage<AttendanceReportRow>>(`/api/reports/records?${attendanceQuery}`));
+        }
+        if (filters.type !== 'attendance') {
+            const ticketQuery = new URLSearchParams(query);
+            ticketQuery.set('type', 'ticket'); ticketQuery.set('take', '25');
+            requests.push(apiRequest<CursorPage<TicketReportRow>>(`/api/reports/records?${ticketQuery}`));
+        }
+
+        Promise.all(requests).then((responses) => {
+            if (!active) return;
+            setSummary(responses[0] as ReportsSummaryResponse);
+            let index = 1;
+            if (filters.type !== 'ticket') {
+                const page = responses[index++] as CursorPage<AttendanceReportRow>;
+                setAttendances(page.records); setAttendanceCursor(page.nextCursor);
+            } else { setAttendances([]); setAttendanceCursor(null); }
+            if (filters.type !== 'attendance') {
+                const page = responses[index] as CursorPage<TicketReportRow>;
+                setTickets(page.records); setTicketCursor(page.nextCursor);
+            } else { setTickets([]); setTicketCursor(null); }
+        }).catch((err) => {
+            if (!active || redirectOnUnauthorized(err, navigate)) return;
+            setError(err instanceof Error ? err.message : 'Erro ao carregar relatórios.');
+            setSummary(null); setAttendances([]); setTickets([]);
+        }).finally(() => { if (active) setLoading(false); });
+        return () => { active = false; };
+    }, [filters, navigate]);
+
+    const loadMore = async (type: 'attendance' | 'ticket') => {
+        const cursor = type === 'attendance' ? attendanceCursor : ticketCursor;
+        if (!cursor) return;
+        setLoadingMore(true);
+        try {
+            const query = queryFor(filters);
+            query.set('type', type);
+            query.set('take', '25');
+            query.set('cursor', cursor);
+            if (type === 'attendance') {
+                const page = await apiRequest<CursorPage<AttendanceReportRow>>(`/api/reports/records?${query}`);
+                setAttendances((current) => [...current, ...page.records]); setAttendanceCursor(page.nextCursor);
+            } else {
+                const page = await apiRequest<CursorPage<TicketReportRow>>(`/api/reports/records?${query}`);
+                setTickets((current) => [...current, ...page.records]); setTicketCursor(page.nextCursor);
+            }
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) setError(err instanceof Error ? err.message : 'Erro ao carregar mais registros.');
+        } finally { setLoadingMore(false); }
+    };
+
+    const exportReport = async (format: 'xlsx' | 'csv') => {
+        setExporting(format);
+        try {
+            const blob = await apiBlobRequest(`/api/reports/export.${format}?${queryFor(filters)}`);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `relatorio-tecnico-${filters.type}-${filters.from}-a-${filters.to}.${format}`;
+            document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+        } catch (err) {
+            if (!redirectOnUnauthorized(err, navigate)) setError(err instanceof Error ? err.message : `Erro ao exportar ${format.toUpperCase()}.`);
+        } finally { setExporting(null); }
+    };
+
+    const preset = (days?: number) => {
+        updateFilters(days === undefined ? currentMonthReportDates() : rollingReportDates(days));
+    };
+
+    const cards = summary ? filters.type === 'attendance' ? [
+        ['Iniciados', summary.attendance.initiated, 'chat', 'primary'],
+        ['Encerrados', summary.attendance.closed, 'check_circle', 'emerald-500'],
+        ['Espera média', formatDuration(summary.attendance.averageWaitSeconds.value), 'schedule', 'amber-500'],
+        ['CSAT', formatAverage(summary.attendance.csat, '/10'), 'sentiment_satisfied', 'violet-500'],
+    ] : filters.type === 'ticket' ? [
+        ['Criados', summary.tickets.created, 'local_activity', 'primary'],
+        ['Agendados', summary.tickets.scheduled, 'schedule', 'amber-500'],
+        ['Concluídos', summary.tickets.completed, 'check_circle', 'emerald-500'],
+        ['Duração média', formatDuration(summary.tickets.averageExecutionSeconds.value), 'engineering', 'violet-500'],
+    ] : [
+        ['Atendimentos', summary.attendance.initiated, 'chat', 'primary'],
+        ['Resolvidos remotamente', summary.attendance.remotelyResolved, 'check_circle', 'emerald-500'],
+        ['Chamados', summary.tickets.created, 'local_activity', 'amber-500'],
+        ['Conversão', `${summary.attendance.conversionRate.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`, 'swap_horiz', 'violet-500'],
+    ] : [];
+
     return (
-        <div className="flex flex-col min-h-screen bg-background text-foreground font-sans">
-            <SigmaTopbar user={user} onLogout={logout} />
-
-            <main className="mx-auto w-full max-w-[1440px] flex-1 p-4 pb-24 sm:p-6 sm:pb-24 md:pb-6 lg:p-10">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-                    <div>
-                        <h1 className="text-3xl font-extrabold tracking-tight text-foreground font-display">Relatórios</h1>
-                        <p className="text-muted-foreground mt-1">Acompanhe os principais indicadores de desempenho do seu time.</p>
-                    </div>
-
-                    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <Icon name="schedule" className="size-5" />
-                        </div>
+        <div className="flex min-h-screen bg-background text-foreground">
+            <SigmaSidebarIcon user={user} onLogout={logout} />
+            <main className="min-w-0 flex-1 pb-24 md:pb-8">
+                <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-6 p-4 md:p-8">
+                    <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                         <div>
-                            <p className="text-xs text-muted-foreground">Período do relatório</p>
-                            <p className="text-sm font-semibold text-foreground">Desde 14/07/2026 às 08:00</p>
+                            <h1 className="text-3xl font-bold tracking-tight">Relatórios</h1>
+                            <p className="mt-1 text-sm text-muted-foreground">Indicadores históricos de Atendimentos no WhatsApp e Chamados técnicos.</p>
                         </div>
-                    </div>
-                </div>
+                        <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" onClick={() => exportReport('csv')} loading={exporting === 'csv'} disabled={loading || exporting !== null}>
+                                Exportar CSV
+                            </Button>
+                            <Button onClick={() => exportReport('xlsx')} loading={exporting === 'xlsx'} disabled={loading || exporting !== null}>
+                                <Icon name="bar_chart" className="size-4" /> Exportar Excel
+                            </Button>
+                        </div>
+                    </header>
 
-                {loading ? (
-                    <div className="flex flex-col gap-8" aria-label="Carregando relatórios">
-                        <div className="grid grid-cols-1 gap-6 md:grid-cols-4">
-                            {Array.from({ length: 4 }).map((_, index) => (
-                                <Skeleton key={index} className="h-32" />
+                    <section aria-label="Filtros do relatório" className="rounded-2xl border border-border bg-surface p-4">
+                        <div className="flex flex-wrap gap-2" role="group" aria-label="Tipo de relatório">
+                            {([['all', 'Todos'], ['attendance', 'Atendimentos'], ['ticket', 'Chamados']] as const).map(([value, label]) => (
+                                <Button key={value} variant={filters.type === value ? 'primary' : 'outline'} size="sm" onClick={() => updateFilters({ type: value })} aria-pressed={filters.type === value}>{label}</Button>
                             ))}
                         </div>
-                        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                            <Skeleton className="h-72" />
-                            <Skeleton className="h-72" />
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            <Button variant="ghost" size="sm" onClick={() => preset(1)}>Hoje</Button>
+                            <Button variant="ghost" size="sm" onClick={() => preset(7)}>7 dias</Button>
+                            <Button variant="ghost" size="sm" onClick={() => preset(30)}>30 dias</Button>
+                            <Button variant="ghost" size="sm" onClick={() => preset()}>Mês atual</Button>
                         </div>
-                    </div>
-                ) : !data ? (
-                    <EmptyState icon="error" title="Erro ao carregar relatórios" description={error || 'Erro ao carregar dados.'} />
-                ) : !hasOperationalData ? (
-                    <EmptyState
-                        icon="dashboard"
-                        title="Sem dados desde o início"
-                        description="Ainda não há conversas, mensagens ou chamados registrados desde 14/07/2026 às 08:00."
-                    />
-                ) : (
-                    <div className="flex flex-col gap-8">
-
-                        {/* KPI Cards */}
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                            <SigmaMetricCard title="Novas Conversas" value={data.metrics.totalConversationsOpened} icon="chat" colorClass="primary" />
-                            <SigmaMetricCard title="Mensagens" value={data.metrics.totalMessages} icon="forum" colorClass="secondary" />
-                            <SigmaMetricCard title="Chamados Abertos" value={data.metrics.totalTicketsOpened} icon="build" colorClass="amber-500" />
-                            <SigmaMetricCard title="Chamados Resolvidos" value={data.metrics.totalTicketsResolved} icon="check_circle" colorClass="secondary" />
+                        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                            <label className="text-sm font-medium">De<input type="date" value={filters.from} onChange={(event) => updateFilters({ from: event.target.value })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30" /></label>
+                            <label className="text-sm font-medium">Até<input type="date" value={filters.to} onChange={(event) => updateFilters({ to: event.target.value })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30" /></label>
+                            <label className="text-sm font-medium">Departamento<select value={filters.departmentId ?? ''} onChange={(event) => updateFilters({ departmentId: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"><option value="">Todos</option>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                            {canViewAll && <label className="text-sm font-medium">Responsável<select value={filters.responsibleUserId ?? ''} onChange={(event) => updateFilters({ responsibleUserId: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"><option value="">Todos</option>{users.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+                            {filters.type !== 'ticket' && <label className="text-sm font-medium">Status do Atendimento<select value={filters.attendanceStatus ?? ''} onChange={(event) => updateFilters({ attendanceStatus: (event.target.value || undefined) as ReportFilters['attendanceStatus'] })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground"><option value="">Todos</option>{Object.entries(attendanceStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                            {filters.type !== 'attendance' && <label className="text-sm font-medium">Status do Chamado<select value={filters.ticketStatus ?? ''} onChange={(event) => updateFilters({ ticketStatus: event.target.value || undefined })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground"><option value="">Todos</option>{Object.entries(ticketStatusLabels).filter(([value]) => !['PENDING', 'SCHEDULED', 'COMPLETED'].includes(value)).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                            {filters.type !== 'attendance' && <label className="text-sm font-medium">Origem<select value={filters.origin ?? ''} onChange={(event) => updateFilters({ origin: (event.target.value || undefined) as ReportFilters['origin'] })} className="mt-1 h-11 w-full rounded-lg border border-border bg-surface px-3 text-foreground"><option value="">Todas</option><option value="WHATSAPP">WhatsApp</option><option value="MANUAL">Manual</option></select></label>}
                         </div>
+                    </section>
 
-                        <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-card">
-                            <div className="border-b border-border px-5 py-4 sm:px-6">
-                                <h2 className="flex items-center gap-2 text-lg font-bold text-foreground font-display">
-                                    <Icon name="bar_chart" className="size-5 text-primary" />
-                                    Relatórios de atendimento
-                                </h2>
-                                <p className="mt-1 text-sm text-muted-foreground">
-                                    Registros mínimos preservados após a remoção das conversas.
-                                </p>
-                            </div>
-
-                            {records.length === 0 ? (
-                                <div className="p-6">
-                                    <EmptyState
-                                        icon="bar_chart"
-                                        title="Nenhum relatório finalizado"
-                                        description="Os registros aparecerão aqui depois que um atendimento for encerrado."
-                                    />
-                                </div>
-                            ) : (
-                                <>
-                                    <div className="divide-y divide-border md:hidden">
-                                        {records.map((record) => (
-                                            <article key={record.id} className="space-y-3 px-5 py-4">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div className="min-w-0">
-                                                        <h3 className="truncate text-sm font-semibold text-foreground">
-                                                            {contactDisplayName({ name: record.customerName }, record.businessName)}
-                                                        </h3>
-                                                        <p className="text-xs text-muted-foreground">
-                                                            {record.businessName || 'Sem empresa'}
-                                                            {record.businessCnpj ? ` · ${formatCnpj(record.businessCnpj)}` : ''}
-                                                        </p>
-                                                    </div>
-                                                    <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
-                                                        {record.rating === null ? 'Sem nota' : `${record.rating}/10`}
-                                                    </span>
-                                                </div>
-                                                <div>
-                                                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{record.systemName}</p>
-                                                    <p className="mt-1 text-sm text-foreground">{record.summary}</p>
-                                                </div>
-                                                {record.observation && <p className="text-sm text-muted-foreground">Obs.: {record.observation}</p>}
-                                                <time className="block text-xs text-muted-foreground" dateTime={record.closedAt}>
-                                                    {new Date(record.closedAt).toLocaleString('pt-BR')}
-                                                </time>
-                                            </article>
-                                        ))}
-                                    </div>
-
-                                    <div className="hidden overflow-x-auto md:block">
-                                        <table className="w-full min-w-[980px] text-left text-sm">
-                                            <thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground">
-                                                <tr>
-                                                    <th className="px-5 py-3 font-semibold">Nome</th>
-                                                    <th className="px-5 py-3 font-semibold">Empresa / CNPJ</th>
-                                                    <th className="px-5 py-3 font-semibold">Sistema</th>
-                                                    <th className="px-5 py-3 font-semibold">Relatório</th>
-                                                    <th className="px-5 py-3 font-semibold">Avaliação</th>
-                                                    <th className="px-5 py-3 font-semibold">Observação</th>
-                                                    <th className="px-5 py-3 font-semibold">Encerrado em</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-border">
-                                                {records.map((record) => (
-                                                    <tr key={record.id} className="align-top transition-colors hover:bg-surface-alt/60">
-                                                        <td className="px-5 py-4 font-semibold text-foreground">
-                                                            {contactDisplayName({ name: record.customerName }, record.businessName)}
-                                                        </td>
-                                                        <td className="px-5 py-4 text-muted-foreground">
-                                                            <span className="block text-foreground">{record.businessName || 'Sem empresa'}</span>
-                                                            {record.businessCnpj && <span className="text-xs">{formatCnpj(record.businessCnpj)}</span>}
-                                                        </td>
-                                                        <td className="px-5 py-4 text-foreground">{record.systemName}</td>
-                                                        <td className="max-w-xs px-5 py-4 text-foreground">{record.summary}</td>
-                                                        <td className="px-5 py-4 font-mono font-bold text-foreground">
-                                                            {record.rating === null ? '—' : `${record.rating}/10`}
-                                                        </td>
-                                                        <td className="max-w-xs px-5 py-4 text-muted-foreground">{record.observation || '—'}</td>
-                                                        <td className="whitespace-nowrap px-5 py-4 text-muted-foreground">
-                                                            {new Date(record.closedAt).toLocaleString('pt-BR')}
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </>
-                            )}
-                        </section>
-
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                            {/* Breakdown by Department */}
-                            <div className="bg-surface border border-border rounded-2xl overflow-hidden p-6 shadow-card">
-                                <h3 className="text-lg font-bold mb-6 text-foreground font-display flex items-center gap-2">
-                                    <Icon name="groups" className="size-5 text-primary" />
-                                    Conversas por Departamento
-                                </h3>
-                                {data.metrics.conversationsByDepartment.length > 0 ? (
-                                    <div className="flex flex-col gap-4">
-                                        {data.metrics.conversationsByDepartment.map((item) => (
-                                            <div key={item.department} className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
-                                                <span className="text-sm text-muted-foreground font-medium">
-                                                    {item.department}
-                                                </span>
-                                                <span className="font-mono text-foreground text-base font-bold bg-surface border border-border px-3 py-1 rounded-md">{item.count}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <EmptyState
-                                        icon="groups"
-                                        title="Sem departamentos"
-                                        description="Nenhuma conversa foi associada a departamento neste período."
-                                    />
-                                )}
-                            </div>
-
-                            {/* Breakdown by Technician */}
-                            <div className="bg-surface border border-border rounded-2xl overflow-hidden p-6 shadow-card">
-                                <h3 className="text-lg font-bold mb-6 text-foreground font-display flex items-center gap-2">
-                                    <Icon name="engineering" className="size-5 text-primary" />
-                                    Chamados por Técnico
-                                </h3>
-                                {data.metrics.ticketsByTechnician.length > 0 ? (
-                                    <div className="flex flex-col gap-4">
-                                        {data.metrics.ticketsByTechnician.map((item) => (
-                                            <div key={item.technician} className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
-                                                <div className="flex items-center gap-3 text-sm font-medium text-foreground">
-                                                    <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs ring-1 ring-border">
-                                                        {item.technician.charAt(0)}
-                                                    </div>
-                                                    {item.technician}
-                                                </div>
-                                                <span className="font-mono text-foreground text-base font-bold bg-surface border border-border px-3 py-1 rounded-md">{item.count}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <EmptyState
-                                        icon="engineering"
-                                        title="Sem técnicos"
-                                        description="Nenhum chamado foi associado a técnico neste período."
-                                    />
-                                )}
-                            </div>
-                        </div>
+                    {error && <div role="alert" className="rounded-xl border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-danger-fg">{error}</div>}
+                    {loading ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Carregando relatórios">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-24" />)}</div> : summary && <>
+                        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{cards.map(([title, value, icon, tone]) => <SigmaMetricCard key={String(title)} title={String(title)} value={value as string | number} icon={icon as any} colorClass={tone as any} />)}</div>
 
                         <section className="overflow-hidden rounded-2xl border border-border bg-surface">
-                            <div className="flex flex-col gap-3 border-b border-border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <h3 className="flex items-center gap-2 text-lg font-bold text-foreground font-display">
-                                        <Icon name="sentiment_satisfied" className="size-5 text-primary" />
-                                        Avaliação por atendente
-                                    </h3>
-                                    <p className="mt-1 text-sm text-muted-foreground">Média das notas de 1 a 10 recebidas após o encerramento no WhatsApp.</p>
-                                </div>
-                                {data.metrics.csat.count > 0 && (
-                                    <div className="shrink-0 rounded-lg bg-surface-alt px-3 py-2 text-right">
-                                        <p className="text-xs text-muted-foreground">Média geral</p>
-                                        <p className="font-mono text-lg font-bold text-foreground">
-                                            {formatRating(data.metrics.csat.average)}<span className="text-sm font-medium text-muted-foreground">/10</span>
-                                        </p>
-                                    </div>
-                                )}
+                            <div className="border-b border-border px-5 py-4">
+                                <h2 className="text-lg font-semibold">Resumo por técnico</h2>
+                                <p className="text-sm text-muted-foreground">Atendimentos no WhatsApp e Chamados/visitas realizados por cada técnico no período.</p>
                             </div>
-
-                            {data.metrics.attendantRatings.length > 0 ? (
-                                <div className="divide-y divide-border">
-                                    {data.metrics.attendantRatings.map((item) => (
-                                        <div key={item.userId} className="flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center">
-                                            <div className="flex min-w-0 flex-1 items-center gap-3">
-                                                <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
-                                                    {item.userName.charAt(0).toUpperCase()}
-                                                </div>
-                                                <div className="min-w-0">
-                                                    <p className="truncate text-sm font-semibold text-foreground">{item.userName}</p>
-                                                    <p className="text-xs text-muted-foreground">
-                                                        {item.count} {item.count === 1 ? 'avaliação' : 'avaliações'}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex w-full items-center gap-3 sm:w-72">
-                                                <div
-                                                    className="h-2 flex-1 overflow-hidden rounded-full bg-surface-alt"
-                                                    role="progressbar"
-                                                    aria-label={`Média de ${item.userName}`}
-                                                    aria-valuemin={0}
-                                                    aria-valuemax={10}
-                                                    aria-valuenow={Number(item.average.toFixed(1))}
-                                                >
-                                                    <div className="h-full rounded-full bg-primary-solid" style={{ width: `${Math.max(0, Math.min(item.average * 10, 100))}%` }} />
-                                                </div>
-                                                <p className="w-16 text-right font-mono text-base font-bold text-foreground">
-                                                    {formatRating(item.average)}<span className="text-xs font-medium text-muted-foreground">/10</span>
-                                                </p>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <div className="p-6">
-                                    <EmptyState
-                                        icon="sentiment_satisfied"
-                                        title="Sem avaliações no período"
-                                        description="As médias aparecerão quando os clientes responderem à pesquisa enviada após o atendimento."
-                                    />
+                            {summary.technicians.length === 0 ? <div className="p-5"><EmptyState icon="engineering" title="Sem atividade técnica" description="Nenhum técnico possui Atendimentos ou Chamados nos filtros selecionados." /></div> : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[640px] text-left text-sm">
+                                        <thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr><th className="px-4 py-3">Técnico</th><th className="px-4 py-3">Atendimentos</th><th className="px-4 py-3">Chamados / Visitas</th><th className="px-4 py-3">Total</th>{canViewAll && <th className="px-4 py-3 text-right">Detalhes</th>}</tr></thead>
+                                        <tbody className="divide-y divide-border">{summary.technicians.map((item) => <tr key={item.userId} className="hover:bg-surface-alt/60"><td className="px-4 py-3 font-semibold">{item.userName}</td><td className="px-4 py-3 font-mono">{item.attendanceCount}</td><td className="px-4 py-3 font-mono">{item.ticketCount}</td><td className="px-4 py-3 font-mono font-bold text-primary">{item.totalCount}</td>{canViewAll && <td className="px-4 py-2 text-right"><Button size="sm" variant="ghost" onClick={() => updateFilters({ responsibleUserId: item.userId })}>Ver clientes</Button></td>}</tr>)}</tbody>
+                                    </table>
                                 </div>
                             )}
                         </section>
 
-                    </div>
-                )}
+                        {filters.type !== 'ticket' && <section className="overflow-hidden rounded-2xl border border-border bg-surface">
+                            <div className="border-b border-border px-5 py-4"><h2 className="text-lg font-semibold">Atendimentos</h2><p className="text-sm text-muted-foreground">{summary.attendance.messagesInbound} recebidas · {summary.attendance.messagesOutbound} enviadas · espera: {summary.attendance.averageWaitSeconds.sampleSize} registros · duração: {summary.attendance.averageHandleSeconds.sampleSize} registros</p></div>
+                            <div className="overflow-x-auto"><table className="w-full min-w-[1280px] text-left text-sm"><thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr>{['Cliente / Contato', 'Empresa', 'Técnico / Atendente', 'Data', 'Sistema / Produto', 'Observação', 'Departamento', 'Status', 'Duração', 'Avaliação'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-border">{attendances.map((item) => <tr key={item.id} className="align-top hover:bg-surface-alt/60"><td className="px-4 py-3 font-medium">{item.contactName}</td><td className="px-4 py-3 text-muted-foreground">{item.companyName ?? '—'}</td><td className="px-4 py-3">{item.attendantName ?? 'Não definido'}</td><td className="px-4 py-3 whitespace-nowrap">{new Date(item.createdAt).toLocaleString('pt-BR')}</td><td className="px-4 py-3">{item.systemProduct ?? 'Não definido'}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3 text-muted-foreground">{item.observation ?? '—'}</td><td className="px-4 py-3">{item.departmentName ?? '—'}</td><td className="px-4 py-3"><Badge tone={item.status === 'CLOSED' ? 'success' : item.status === 'ASSIGNED' ? 'primary' : 'warning'}>{attendanceStatusLabels[item.status] ?? item.status}</Badge></td><td className="px-4 py-3">{formatDuration(item.durationSeconds)}</td><td className="px-4 py-3">{item.rating === null ? '—' : `${item.rating}/10`}</td></tr>)}</tbody></table></div>
+                            {attendances.length === 0 ? <div className="p-5"><EmptyState icon="chat" title="Nenhum Atendimento" description="Não há Atendimentos que correspondam aos filtros atuais." /></div> : attendanceCursor && <div className="border-t border-border p-4 text-center"><Button variant="outline" loading={loadingMore} onClick={() => loadMore('attendance')}>Carregar mais Atendimentos</Button></div>}
+                        </section>}
+
+                        {filters.type !== 'attendance' && <section className="overflow-hidden rounded-2xl border border-border bg-surface">
+                            <div className="border-b border-border px-5 py-4"><h2 className="text-lg font-semibold">Chamados</h2><p className="text-sm text-muted-foreground">{summary.tickets.whatsappOrigin} via WhatsApp · {summary.tickets.manualOrigin} manuais · {summary.tickets.withoutTechnician} sem técnico · {summary.tickets.withoutSchedule} sem data · duração: {summary.tickets.averageExecutionSeconds.sampleSize} registros</p></div>
+                            <div className="overflow-x-auto"><table className="w-full min-w-[1200px] text-left text-sm"><thead className="bg-surface-alt text-xs uppercase tracking-wider text-muted-foreground"><tr>{['Protocolo', 'Cliente', 'Origem', 'Técnico', 'Data', 'Sistema / Produto', 'Observação', 'Departamento', 'Status', 'Duração'].map((label) => <th key={label} className="px-4 py-3 font-semibold">{label}</th>)}</tr></thead><tbody className="divide-y divide-border">{tickets.map((item) => <tr key={item.id} className="align-top hover:bg-surface-alt/60"><td className="px-4 py-3 font-medium">{item.protocol ?? item.id.slice(0, 8)}</td><td className="px-4 py-3">{item.customerName}</td><td className="px-4 py-3">{item.origin === 'WHATSAPP' ? 'WhatsApp' : 'Manual'}</td><td className="px-4 py-3">{item.technicianName ?? 'Não definido'}</td><td className="px-4 py-3 whitespace-nowrap">{new Date(item.reportDate).toLocaleString('pt-BR')}</td><td className="px-4 py-3">{item.systemProduct ?? 'Não definido'}</td><td className="max-w-sm whitespace-pre-wrap px-4 py-3 text-muted-foreground">{item.observation ?? '—'}</td><td className="px-4 py-3">{item.departmentName ?? '—'}</td><td className="px-4 py-3"><Badge tone={item.status === 'CANCELED' ? 'danger' : item.status === 'CLOSED' || item.status === 'RESOLVED' ? 'success' : 'primary'}>{ticketStatusLabels[item.status] ?? item.status}</Badge></td><td className="px-4 py-3">{formatDuration(item.durationSeconds)}</td></tr>)}</tbody></table></div>
+                            {tickets.length === 0 ? <div className="p-5"><EmptyState icon="local_activity" title="Nenhum Chamado" description="Não há Chamados que correspondam aos filtros atuais." /></div> : ticketCursor && <div className="border-t border-border p-4 text-center"><Button variant="outline" loading={loadingMore} onClick={() => loadMore('ticket')}>Carregar mais Chamados</Button></div>}
+                        </section>}
+
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                            {filters.type !== 'ticket' && <><Breakdown title="Atendimentos por atendente" values={summary.attendance.byAttendant} /><Breakdown title="Atendimentos por departamento" values={summary.attendance.byDepartment} /><Breakdown title="Atendimentos por assunto" values={summary.attendance.byTopic} /><CsatBreakdown values={summary.attendance.csatByAttendant} /></>}
+                            {filters.type !== 'attendance' && <><Breakdown title="Chamados por técnico" values={summary.tickets.byTechnician} /><Breakdown title="Chamados por status" values={summary.tickets.byStatus} /><Breakdown title="Chamados por departamento" values={summary.tickets.byDepartment} /></>}
+                        </div>
+                    </>}
+                </div>
             </main>
         </div>
     );

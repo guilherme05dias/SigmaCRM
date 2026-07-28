@@ -43,7 +43,7 @@ export async function notifyFieldVisitAssigned(input: {
         companyId: input.companyId,
         userId: input.technicianId,
         type: NotificationType.FIELD_VISIT_ASSIGNED,
-        title: 'Nova visita técnica atribuída',
+        title: 'Chamado atribuído',
         body: `${input.protocol || 'Chamado'} — ${input.title}`,
         link: `/tickets/${input.ticketId}`,
         payload: {
@@ -68,7 +68,7 @@ export async function notifyFieldVisitScheduleChanged(input: {
         companyId: input.companyId,
         userId: input.technicianId,
         type: NotificationType.FIELD_VISIT_SCHEDULE_CHANGED,
-        title: 'Agenda da visita alterada',
+        title: 'Agenda do chamado alterada',
         body: `${input.protocol || 'Chamado'} — ${input.reason}`,
         link: `/tickets/${input.ticketId}`,
         payload: {
@@ -102,7 +102,7 @@ export async function notifyFieldVisitStatusChanged(input: {
         companyId: input.companyId,
         userId: input.technicianId,
         type: NotificationType.FIELD_VISIT_STATUS_CHANGED,
-        title: 'Status da visita atualizado',
+        title: 'Status do chamado atualizado',
         body: `${input.protocol || 'Chamado'} - ${fieldVisitStatusLabels[input.newStatus] || input.newStatus}`,
         link: `/tickets/${input.ticketId}`,
         payload: {

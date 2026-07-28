@@ -207,10 +207,33 @@
   .sigma-chat-header {
     container-name: chat-header;
     container-type: inline-size;
+    flex-wrap: nowrap;
+  }
+
+  .sigma-chat-contact {
+    flex-basis: 12rem;
+  }
+
+  .sigma-chat-actions,
+  .sigma-chat-action-group {
+    display: flex;
+    align-items: center;
+  }
+
+  .sigma-chat-action-group {
+    gap: 0.5rem;
+  }
+
+  .sigma-chat-action-divider {
+    width: 1px;
+    height: 1.5rem;
+    flex: 0 0 1px;
+    background-color: var(--c-border);
   }
 
   .sigma-chat-action-button {
     width: 2.75rem;
+    flex-shrink: 0;
     padding-inline: 0;
   }
 
@@ -223,33 +246,67 @@
     display: inline-flex;
   }
 
-  @container chat-header (min-width: 980px) {
-    .sigma-chat-action-button {
+  @container chat-header (min-width: 720px) {
+    .sigma-chat-action-button--primary {
       width: auto !important;
       padding-inline: 1rem !important;
     }
 
-    .sigma-chat-action-label {
+    .sigma-chat-action-label--primary {
       display: inline;
     }
+  }
 
+  @container chat-header (min-width: 1040px) {
     .sigma-chat-transfer-wide {
       display: flex;
     }
 
     .sigma-chat-transfer-compact {
-      display: none;
+      display: none !important;
+    }
+
+    .sigma-chat-transfer-select {
+      width: 10.5rem;
+    }
+
+    .sigma-chat-transfer-submit {
+      padding-inline: 0.75rem;
+    }
+  }
+
+  @container chat-header (min-width: 1280px) {
+    .sigma-chat-action-button--secondary {
+      width: auto !important;
+      padding-inline: 1rem !important;
+    }
+
+    .sigma-chat-action-label--secondary {
+      display: inline;
     }
   }
 
   @container chat-header (max-width: 520px) {
+    .sigma-chat-header {
+      flex-wrap: wrap;
+    }
+
     .sigma-chat-contact,
     .sigma-chat-actions {
       width: 100%;
     }
 
     .sigma-chat-actions {
-      justify-content: flex-end;
+      justify-content: flex-start;
+      gap: 0.375rem;
+    }
+
+    .sigma-chat-action-group {
+      gap: 0.375rem;
+    }
+
+    .sigma-chat-action-divider {
+      margin-inline: 0.125rem;
     }
   }
 
@@ -292,4 +349,5 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+
 }

@@ -38,6 +38,12 @@ enum ConversationStatus {
   CLOSED
 }
 
+enum ConversationCloseMode {
+  WITH_RATING
+  INACTIVITY
+  SILENT
+}
+
 enum TicketStatus {
   NEW
   QUEUED
@@ -116,6 +122,38 @@ enum NotificationType {
   CONVERSATION_TRANSFERRED
   CONVERSATION_FALLBACK_ASSIGNED
   CONVERSATION_QUEUED
+  ASSISTANT_TASK_DUE
+  ASSISTANT_TASK_ASSIGNED
+}
+
+enum AssistantTaskStatus {
+  PENDING
+  IN_PROGRESS
+  WAITING
+  COMPLETED
+  DISMISSED
+}
+
+enum AssistantTaskSource {
+  MANUAL
+  AI
+  CONVERSATION
+  TICKET
+  VISIT
+}
+
+enum AssistantTaskActivityType {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  ASSIGNED
+  COMPLETED
+  REOPENED
+}
+
+enum AssistantAnalysisScope {
+  OVERVIEW
+  TICKET
 }
 
 model Company {
@@ -124,16 +162,25 @@ model Company {
   legalName           String?  @map("razao_social")
   defaultTechnicianId String?  @map("default_technician_id")
   defaultTechnician   User?    @relation("CompanyDefaultTechnician", fields: [defaultTechnicianId], references: [id], onDelete: SetNull)
+  defaultDepartmentId String?  @map("default_department_id")
+  defaultDepartment   Department? @relation("CompanyDefaultDepartment", fields: [defaultDepartmentId], references: [id], onDelete: SetNull)
   active              Boolean  @default(true) @map("ativo")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  users         User[]         @relation("CompanyUsers")
-  departments   Department[]
-  serviceTopics ServiceTopic[]
-  customerBusinesses CustomerBusiness[]
-  conversationReports ConversationReport[]
-  settings      Settings?
+  users                       User[]                       @relation("CompanyUsers")
+  departments                 Department[]
+  serviceTopics               ServiceTopic[]
+  customerBusinesses          CustomerBusiness[]
+  conversationReports         ConversationReport[]
+  assistantAnalyses           AssistantAnalysis[]
+  assistantTasks              AssistantTask[]
+  assistantTaskActivities     AssistantTaskActivity[]
+  assistantTaskChecklistItems AssistantTaskChecklistItem[]
+  settings                    Settings?
+
+  @@index([defaultTechnicianId])
+  @@index([defaultDepartmentId])
 }
 
 model User {
@@ -152,16 +199,21 @@ model User {
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
-  conversations             Conversation[]             @relation("ConversationAssignee")
-  messages                  Message[]
-  ticketsAssigned           Ticket[]                   @relation("TicketAssignee")
-  fieldServices             TicketFieldService[]       @relation("FieldTechnician")
-  fieldVisitScheduleChanges FieldVisitScheduleChange[] @relation("FieldVisitScheduleChanger")
-  timelineEvents            TicketTimeline[]           @relation("TimelineActor")
-  defaultForCompanies       Company[]                  @relation("CompanyDefaultTechnician")
-  notifications             Notification[]
+  conversations              Conversation[]             @relation("ConversationAssignee")
+  messages                   Message[]
+  ticketsAssigned            Ticket[]                   @relation("TicketAssignee")
+  fieldServices              TicketFieldService[]       @relation("FieldTechnician")
+  fieldVisitScheduleChanges  FieldVisitScheduleChange[] @relation("FieldVisitScheduleChanger")
+  timelineEvents             TicketTimeline[]           @relation("TimelineActor")
+  defaultForCompanies        Company[]                  @relation("CompanyDefaultTechnician")
+  notifications              Notification[]
+  assistantAnalysesRequested AssistantAnalysis[]        @relation("AssistantAnalysisRequester")
+  assistantTasksCreated      AssistantTask[]            @relation("AssistantTaskCreator")
+  assistantTasksAssigned     AssistantTask[]            @relation("AssistantTaskAssignee")
+  assistantTaskActivities    AssistantTaskActivity[]
 
   @@index([companyId])
+  @@index([departmentId])
 }
 
 model Department {
@@ -177,6 +229,7 @@ model Department {
   users         User[]
   conversations Conversation[]
   tickets       Ticket[]
+  defaultForCompanies Company[] @relation("CompanyDefaultDepartment")
 
   @@index([companyId])
 }
@@ -191,24 +244,27 @@ model ServiceTopic {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  conversations Conversation[]
-  tickets       Ticket[]
+  conversations  Conversation[]
+  tickets        Ticket[]
+  assistantTasks AssistantTask[]
 
   @@unique([companyId, name])
   @@index([companyId])
 }
 
 model Settings {
-  id             String   @id @default(uuid())
-  companyId      String   @unique @map("company_id")
-  company        Company  @relation(fields: [companyId], references: [id])
-  businessHours  Json
-  welcomeMessage String?
-  awayMessage    String?
-  closingMessage String?
-  externalServiceGroupId   String? @map("external_service_group_id")
-  externalServiceGroupName String? @map("external_service_group_name")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id                       String   @id @default(uuid())
+  companyId                String   @unique @map("company_id")
+  company                  Company  @relation(fields: [companyId], references: [id])
+  businessHours            Json
+  welcomeMessage           String?
+  awayMessage              String?
+  closingMessage           String?
+  inactivityClosingMessage String?  @map("inactivity_closing_message")
+  satisfactionPrompt       String?  @map("satisfaction_prompt")
+  externalServiceGroupId   String?  @map("external_service_group_id")
+  externalServiceGroupName String?  @map("external_service_group_name")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 }
 
 model Customer {
@@ -224,9 +280,10 @@ model Customer {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  contacts Contact[]
-  businesses CustomerBusiness[]
-  tickets  Ticket[]
+  contacts       Contact[]
+  businesses     CustomerBusiness[]
+  tickets        Ticket[]
+  assistantTasks AssistantTask[]
 
   @@index([companyId])
 }
@@ -249,29 +306,31 @@ model CustomerBusiness {
 }
 
 model Contact {
-  id         String    @id @default(uuid())
-  companyId  String?
-  customerId String?
-  customer   Customer? @relation(fields: [customerId], references: [id])
-  businessId String?   @map("business_id")
-  business   CustomerBusiness? @relation(fields: [businessId], references: [id], onDelete: SetNull)
-  name       String?
-  phone      String
-  email      String?
-  role       String?
-  notes      String?
-  avatarUrl  String?   @map("avatar_url")
-  isWhatsAppGroup        Boolean @default(false) @map("is_whatsapp_group")
-  welcomeMessageEnabled  Boolean @default(true)  @map("welcome_message_enabled")
-  includeInServiceReports Boolean @default(true) @map("include_in_service_reports")
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id                      String            @id @default(uuid())
+  companyId               String?
+  customerId              String?
+  customer                Customer?         @relation(fields: [customerId], references: [id])
+  businessId              String?           @map("business_id")
+  business                CustomerBusiness? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+  name                    String?
+  phone                   String
+  email                   String?
+  role                    String?
+  notes                   String?
+  avatarUrl               String?           @map("avatar_url")
+  isWhatsAppGroup         Boolean           @default(false) @map("is_whatsapp_group")
+  welcomeMessageEnabled   Boolean           @default(true) @map("welcome_message_enabled")
+  includeInServiceReports Boolean           @default(true) @map("include_in_service_reports")
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
 
-  conversations Conversation[]
-  tickets       Ticket[]
+  conversations  Conversation[]
+  tickets        Ticket[]
+  assistantTasks AssistantTask[]
 
   @@unique([companyId, phone])
   @@index([companyId])
+  @@index([customerId])
   @@index([businessId])
 }
 
@@ -300,72 +359,82 @@ model Conversation {
   closeResult            String?
   closeSummary           String?
   closeNotes             String?
+  closeMode              ConversationCloseMode?
   lastWelcomeSentAt      DateTime?
-  lastAwaySentAt         DateTime?           @db.Timestamptz(3)
+  lastAwaySentAt         DateTime?              @db.Timestamptz(3)
   ratingRequestedAt      DateTime?
   rating                 Int?
   ratedAt                DateTime?
-  unreadCount            Int      @default(0) @map("unread_count")
-  fieldServiceRequired   Boolean   @default(false)
-  isTransferred          Boolean   @default(false)
+  unreadCount            Int                    @default(0) @map("unread_count")
+  fieldServiceRequired   Boolean                @default(false)
+  isTransferred          Boolean                @default(false)
   totalHandleTimeSeconds Int?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
 
-  messages Message[]
-  tickets  Ticket[]
-  report   ConversationReport?
-  inboundEvents WhatsAppInboundEvent[]
+  messages       Message[]
+  tickets        Ticket[]
+  report         ConversationReport?
+  inboundEvents  WhatsAppInboundEvent[]
+  assistantTasks AssistantTask[]
 
   @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([companyId, closedAt])
+  @@index([companyId, assignedUserId, createdAt])
+  @@index([assignedUserId])
+  @@index([departmentId])
   @@index([contactId])
   @@index([serviceTopicId])
 }
 
 model ConversationReport {
-  id             String       @id @default(uuid())
-  companyId      String       @map("company_id")
-  company        Company      @relation(fields: [companyId], references: [id])
-  conversationId String       @unique @map("conversation_id")
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  customerName   String       @map("customer_name")
-  businessName   String?      @map("business_name")
-  businessCnpj   String?      @map("business_cnpj")
-  systemName     String       @map("system_name")
+  id             String                 @id @default(uuid())
+  companyId      String                 @map("company_id")
+  company        Company                @relation(fields: [companyId], references: [id])
+  conversationId String                 @unique @map("conversation_id")
+  conversation   Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  customerName   String                 @map("customer_name")
+  businessName   String?                @map("business_name")
+  businessCnpj   String?                @map("business_cnpj")
+  systemName     String                 @map("system_name")
   summary        String
   rating         Int?
   observation    String?
-  closedAt       DateTime     @map("closed_at")
-  ratedAt        DateTime?    @map("rated_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
+  closeMode      ConversationCloseMode? @map("close_mode")
+  closedAt       DateTime               @map("closed_at")
+  ratedAt        DateTime?              @map("rated_at")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
 
   @@index([companyId, closedAt])
 }
 
 model Message {
-  id               String           @id @default(uuid())
-  companyId        String?
-  conversationId   String
-  conversation     Conversation     @relation(fields: [conversationId], references: [id])
-  direction        MessageDirection
-  type             MessageType
-  body             String?
-  mediaUrl         String?
-  waMessageId      String?
-  userId           String?
-  user             User?            @relation(fields: [userId], references: [id])
-  replyToMessageId String?
-  replyToMessage   Message?         @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
-  replies          Message[]        @relation("MessageReplies")
-  editedAt         DateTime?        @map("edited_at")
-  deletedAt        DateTime?        @map("deleted_at")
-  deletedByCustomer Boolean         @default(false) @map("deleted_by_customer")
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                String           @id @default(uuid())
+  companyId         String?
+  conversationId    String
+  conversation      Conversation     @relation(fields: [conversationId], references: [id])
+  direction         MessageDirection
+  type              MessageType
+  body              String?
+  mediaUrl          String?
+  waMessageId       String?
+  userId            String?
+  user              User?            @relation(fields: [userId], references: [id])
+  replyToMessageId  String?
+  replyToMessage    Message?         @relation("MessageReplies", fields: [replyToMessageId], references: [id], onDelete: SetNull)
+  replies           Message[]        @relation("MessageReplies")
+  editedAt          DateTime?        @map("edited_at")
+  deletedAt         DateTime?        @map("deleted_at")
+  deletedByCustomer Boolean          @default(false) @map("deleted_by_customer")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([companyId])
+  @@index([companyId, createdAt])
   @@index([conversationId])
+  @@index([userId])
   @@index([replyToMessageId])
 }
 
@@ -401,12 +470,22 @@ model Ticket {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  fieldService TicketFieldService?
-  evaluation   TicketEvaluation?
-  timeline     TicketTimeline[]
+  fieldService      TicketFieldService?
+  evaluation        TicketEvaluation?
+  timeline          TicketTimeline[]
+  assistantAnalyses AssistantAnalysis[]
+  assistantTasks    AssistantTask[]
 
   @@unique([companyId, protocol])
   @@index([companyId])
+  @@index([companyId, createdAt])
+  @@index([companyId, status, createdAt])
+  @@index([companyId, conversationId])
+  @@index([assignedUserId])
+  @@index([contactId])
+  @@index([conversationId])
+  @@index([customerId])
+  @@index([departmentId])
   @@index([status])
   @@index([serviceTopicId])
 }
@@ -440,8 +519,14 @@ model TicketFieldService {
   updatedAt DateTime @updatedAt
 
   scheduleChanges FieldVisitScheduleChange[]
+  assistantTasks  AssistantTask[]
 
   @@index([companyId])
+  @@index([companyId, scheduledAt])
+  @@index([companyId, finishedAt])
+  @@index([companyId, status, scheduledAt])
+  @@index([companyId, technicianId, scheduledAt])
+  @@index([technicianId])
   @@index([status])
 }
 
@@ -459,6 +544,7 @@ model FieldVisitScheduleChange {
 
   @@index([companyId])
   @@index([fieldServiceId])
+  @@index([changedByUserId])
 }
 
 model TicketEvaluation {
@@ -486,6 +572,7 @@ model TicketTimeline {
 
   @@index([companyId])
   @@index([ticketId])
+  @@index([actorUserId])
 }
 
 model Notification {
@@ -504,6 +591,109 @@ model Notification {
   @@index([companyId])
   @@index([userId, readAt, createdAt])
   @@index([companyId, userId, readAt])
+}
+
+model AssistantAnalysis {
+  id                String                 @id @default(uuid())
+  companyId         String                 @map("company_id")
+  company           Company                @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  requestedByUserId String                 @map("requested_by_user_id")
+  requestedBy       User                   @relation("AssistantAnalysisRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  scope             AssistantAnalysisScope @default(OVERVIEW)
+  ticketId          String?                @map("ticket_id")
+  ticket            Ticket?                @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  model             String
+  summary           String
+  result            Json
+  periodStart       DateTime?              @map("period_start")
+  periodEnd         DateTime?              @map("period_end")
+  createdAt         DateTime               @default(now()) @map("created_at")
+
+  tasks AssistantTask[]
+
+  @@index([companyId, createdAt])
+  @@index([requestedByUserId])
+  @@index([ticketId])
+}
+
+model AssistantTask {
+  id              String                       @id @default(uuid())
+  companyId       String                       @map("company_id")
+  company         Company                      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdByUserId String                       @map("created_by_user_id")
+  createdBy       User                         @relation("AssistantTaskCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignedUserId  String?                      @map("assigned_user_id")
+  assignedUser    User?                        @relation("AssistantTaskAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  analysisId      String?                      @map("analysis_id")
+  analysis        AssistantAnalysis?           @relation(fields: [analysisId], references: [id], onDelete: SetNull)
+  ticketId        String?                      @map("ticket_id")
+  ticket          Ticket?                      @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  conversationId  String?                      @map("conversation_id")
+  conversation    Conversation?                @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  customerId      String?                      @map("customer_id")
+  customer        Customer?                    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  contactId       String?                      @map("contact_id")
+  contact         Contact?                     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  serviceTopicId  String?                      @map("service_topic_id")
+  serviceTopic    ServiceTopic?                @relation(fields: [serviceTopicId], references: [id], onDelete: SetNull)
+  fieldServiceId  String?                      @map("field_service_id")
+  fieldService    TicketFieldService?          @relation(fields: [fieldServiceId], references: [id], onDelete: SetNull)
+  title           String
+  description     String?
+  priority        TicketPriority               @default(MEDIUM)
+  status          AssistantTaskStatus          @default(PENDING)
+  source          AssistantTaskSource          @default(MANUAL)
+  dueAt           DateTime?                    @map("due_at")
+  remindedAt      DateTime?                    @map("reminded_at")
+  completedAt     DateTime?                    @map("completed_at")
+  createdAt       DateTime                     @default(now()) @map("created_at")
+  updatedAt       DateTime                     @updatedAt @map("updated_at")
+  activities      AssistantTaskActivity[]
+  checklistItems  AssistantTaskChecklistItem[]
+
+  @@index([companyId, status, dueAt])
+  @@index([assignedUserId, status, dueAt])
+  @@index([createdByUserId])
+  @@index([analysisId])
+  @@index([ticketId])
+  @@index([conversationId])
+  @@index([customerId])
+  @@index([contactId])
+  @@index([serviceTopicId])
+  @@index([fieldServiceId])
+}
+
+model AssistantTaskActivity {
+  id          String                    @id @default(uuid())
+  companyId   String                    @map("company_id")
+  company     Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  taskId      String                    @map("task_id")
+  task        AssistantTask             @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actorUserId String?                   @map("actor_user_id")
+  actor       User?                     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  type        AssistantTaskActivityType
+  payload     Json?
+  createdAt   DateTime                  @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt])
+  @@index([taskId, createdAt])
+  @@index([actorUserId])
+}
+
+model AssistantTaskChecklistItem {
+  id          String        @id @default(uuid())
+  companyId   String        @map("company_id")
+  company     Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  taskId      String        @map("task_id")
+  task        AssistantTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  text        String
+  position    Int           @default(0)
+  completedAt DateTime?     @map("completed_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@index([companyId, createdAt])
+  @@index([taskId, position])
 }
 
 model Counter {

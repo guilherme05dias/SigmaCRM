@@ -16,6 +16,8 @@ const Tickets = lazy(() => import('./pages/Tickets'));
 const TicketDetail = lazy(() => import('./pages/TicketDetail'));
 const Visits = lazy(() => import('./pages/Visits'));
 const Reports = lazy(() => import('./pages/Reports'));
+const Assistant = lazy(() => import('./pages/Assistant'));
+const Tasks = lazy(() => import('./pages/Tasks'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const NotFound = lazy(() => import('./pages/NotFound'));
@@ -132,6 +134,8 @@ function App() {
                     element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><ServiceTopics /></RoleGuard></ProtectedLayout>}
                 />
                 <Route path="/reports" element={<ProtectedLayout><Reports /></ProtectedLayout>} />
+                <Route path="/assistant" element={<ProtectedLayout><Assistant /></ProtectedLayout>} />
+                <Route path="/tasks" element={<ProtectedLayout><Tasks /></ProtectedLayout>} />
                 <Route
                     path="/settings"
                     element={<ProtectedLayout><RoleGuard allowedRoles={['ADMIN', 'SUPERVISOR']}><Settings /></RoleGuard></ProtectedLayout>}

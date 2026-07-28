@@ -31,6 +31,9 @@ router.get('/', async (req, res) => {
                 { name: { contains: query, mode: 'insensitive' } },
                 { phone: { contains: query } },
                 { email: { contains: query, mode: 'insensitive' } },
+                { business: { name: { contains: query, mode: 'insensitive' } } },
+                { customer: { name: { contains: query, mode: 'insensitive' } } },
+                { customer: { businesses: { some: { name: { contains: query, mode: 'insensitive' } } } } },
             ];
         }
         const contacts = await prisma.contact.findMany({

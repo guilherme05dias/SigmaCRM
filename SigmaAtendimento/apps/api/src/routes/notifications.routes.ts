@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { NotificationType, Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authMiddleware } from '../middlewares/auth.middleware';
@@ -8,6 +9,7 @@ const router = Router();
 
 const ListQuerySchema = z.object({
     unreadOnly: z.string().optional(),
+    mascotOnly: z.string().optional(),
     take: z.string().optional().transform((value) => value ? Math.min(Math.max(Number(value), 1), 100) : 20),
 });
 
@@ -25,19 +27,25 @@ router.get('/', async (req, res) => {
         }
 
         const unreadOnly = parsed.data.unreadOnly === 'true';
+        const mascotOnly = parsed.data.mascotOnly === 'true';
+        const where = {
+            companyId,
+            userId,
+            ...(unreadOnly ? { readAt: null } : {}),
+            ...(mascotOnly ? {
+                type: NotificationType.ASSISTANT_TASK_DUE,
+                payload: { path: ['mascotAgentId'], equals: 'FOLLOWUP_MASCOT' },
+            } : {}),
+        } satisfies Prisma.NotificationWhereInput;
 
         const [items, unreadCount] = await Promise.all([
             prisma.notification.findMany({
-                where: {
-                    companyId,
-                    userId,
-                    ...(unreadOnly ? { readAt: null } : {}),
-                },
+                where,
                 orderBy: { createdAt: 'desc' },
                 take: parsed.data.take,
             }),
             prisma.notification.count({
-                where: { companyId, userId, readAt: null },
+                where: { ...where, readAt: null },
             }),
         ]);
 

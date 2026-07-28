@@ -75,6 +75,7 @@ export interface Conversation {
     closeResult?: string | null;
     closeSummary?: string | null;
     closeNotes?: string | null;
+    closeMode?: 'WITH_RATING' | 'INACTIVITY' | 'SILENT' | null;
     fieldServiceRequired?: boolean;
     unreadCount: number;
     assignedUserId?: string | null;

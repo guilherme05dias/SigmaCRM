@@ -44,7 +44,7 @@ export async function apiBlobRequest(path: string): Promise<Blob> {
     });
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
-        throw new ApiError(payload?.error || 'Não foi possível carregar a mídia.', response.status);
+        throw new ApiError(payload?.error || 'Não foi possível baixar o arquivo.', response.status);
     }
     return response.blob();
 }

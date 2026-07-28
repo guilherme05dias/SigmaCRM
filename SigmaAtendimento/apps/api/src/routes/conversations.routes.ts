@@ -12,6 +12,7 @@ import { cancelConversationFallback } from '../services/conversationFallback.ser
 import { sendMediaWithOutbox, sendTextWithOutbox } from '../services/whatsappOutbox.service';
 import { getProviderUnreadCounts, setCachedProviderUnreadCount } from '../services/providerUnread.service';
 import { normalizePhone, phoneAliases } from '../lib/phone';
+import { getDefaultDepartmentId } from '../services/defaultDepartment.service';
 
 const router = Router();
 const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
@@ -144,6 +145,7 @@ router.post('/start', async (req: Request, res: Response) => {
             const department = await prisma.department.findFirst({ where: { id: departmentId, companyId }, select: { id: true } });
             if (!department) return res.status(404).json({ error: 'Departamento não encontrado nesta empresa.' });
         }
+        const resolvedDepartmentId = departmentId || await getDefaultDepartmentId(companyId);
 
         if (contact) {
             contact = await prisma.contact.update({
@@ -225,7 +227,7 @@ router.post('/start', async (req: Request, res: Response) => {
                 data: {
                     companyId,
                     contactId: contact.id,
-                    departmentId: departmentId || undefined,
+                    departmentId: resolvedDepartmentId || undefined,
                     assignedUserId: userId || undefined,
                     status: ConversationStatus.ASSIGNED,
                     assignedAt: new Date(),

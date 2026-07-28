@@ -104,6 +104,8 @@ Deno.serve(async (req) => {
         return [{
           phone: contactPhone,
           unreadCount: number(chat.wa_unreadCount ?? chat.unreadCount) || 0,
+          name: string(chat.name ?? chat.wa_contactName ?? chat.wa_name ?? chat.pushName ?? chat.notifyName),
+          lastMessageAt: number(chat.wa_lastMsgTimestamp ?? chat.lastMessageAt ?? chat.timestamp),
         }];
       });
       return json({ ok: true, chats }, 200);

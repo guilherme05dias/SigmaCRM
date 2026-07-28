@@ -54,13 +54,24 @@ export const initSocket = (httpServer: HttpServer) => {
         socket.on('conversation:join', async ({ conversationId }) => {
             if (!conversationId || !socket.data.companyId) return;
 
-            const conversation = await prisma.conversation.findFirst({
-                where: { id: conversationId, companyId: socket.data.companyId },
-                select: { id: true },
-            });
+            try {
+                const conversation = await prisma.conversation.findFirst({
+                    where: { id: conversationId, companyId: socket.data.companyId },
+                    select: { id: true },
+                });
 
-            if (conversation) {
-                socket.join(`conversation:${conversationId}`);
+                if (conversation) {
+                    socket.join(`conversation:${conversationId}`);
+                }
+            } catch (error) {
+                // Socket callbacks do not have Express' error boundary. A temporary
+                // database outage here must not become an unhandled rejection and
+                // terminate the entire API process.
+                console.error('[socket] Falha ao entrar na sala da conversa:', {
+                    conversationId,
+                    companyId: socket.data.companyId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
             }
         });
 

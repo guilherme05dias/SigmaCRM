@@ -2,6 +2,7 @@ import { ConversationStatus } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { emitToCompany } from '../socket';
 import { notifyConversationFallbackAssigned, notifyConversationQueued } from './notification.service';
+import { isDefaultSupportDepartmentName } from './defaultDepartment.service';
 
 const FALLBACK_DELAY_MS = 2 * 60 * 1000;
 const fallbackTimers = new Map<string, NodeJS.Timeout>();
@@ -40,14 +41,14 @@ export function startConversationFallbackWorker() {
 
 async function processPendingQueueNotifications() {
     const pending = await prisma.conversation.findMany({
-        where: { status: ConversationStatus.OPEN, assignedUserId: null, departmentId: null, queueNotifiedAt: null },
+        where: { status: ConversationStatus.OPEN, assignedUserId: null, isTransferred: false, queueNotifiedAt: null },
         select: { id: true, companyId: true, contact: { select: { name: true, phone: true } } },
         take: 100,
     });
     await Promise.all(pending.map(async (conversation) => {
         if (!conversation.companyId) return;
         const claimed = await prisma.conversation.updateMany({
-            where: { id: conversation.id, companyId: conversation.companyId, status: ConversationStatus.OPEN, assignedUserId: null, departmentId: null, queueNotifiedAt: null },
+            where: { id: conversation.id, companyId: conversation.companyId, status: ConversationStatus.OPEN, assignedUserId: null, isTransferred: false, queueNotifiedAt: null },
             data: { queueNotifiedAt: new Date() },
         });
         if (!claimed.count) return;
@@ -61,15 +62,16 @@ async function processPendingFallbacks() {
         where: {
             status: ConversationStatus.OPEN,
             assignedUserId: null,
-            departmentId: null,
+            isTransferred: false,
             fallbackAssignedAt: null,
             createdAt: { lte: threshold },
         },
-        select: { id: true, companyId: true },
+        select: { id: true, companyId: true, department: { select: { name: true } } },
         take: 100,
     });
     await Promise.all(pending
-        .filter((conversation) => Boolean(conversation.companyId))
+        .filter((conversation) => Boolean(conversation.companyId)
+            && (!conversation.department || isDefaultSupportDepartmentName(conversation.department.name)))
         .map((conversation) => assignFallback({ conversationId: conversation.id, companyId: conversation.companyId! })));
 }
 
@@ -85,7 +87,8 @@ async function assignFallback(input: { conversationId: string; companyId: string
                 messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { id: true, direction: true, type: true, body: true, createdAt: true, waMessageId: true } },
             },
         });
-        if (!conversation || conversation.status !== ConversationStatus.OPEN || conversation.assignedUserId || conversation.departmentId) return;
+        if (!conversation || conversation.status !== ConversationStatus.OPEN || conversation.assignedUserId || conversation.isTransferred) return;
+        if (conversation.departmentId && !isDefaultSupportDepartmentName(conversation.department?.name)) return;
 
         const company = await prisma.company.findFirst({
             where: { id: input.companyId, active: true },
@@ -96,7 +99,7 @@ async function assignFallback(input: { conversationId: string; companyId: string
         if (!company?.defaultTechnicianId || !company.defaultTechnician?.active || !canBeDefaultTechnician) return;
 
         const claimed = await prisma.conversation.updateMany({
-            where: { id: conversation.id, companyId: input.companyId, status: ConversationStatus.OPEN, assignedUserId: null, departmentId: null, fallbackAssignedAt: null },
+            where: { id: conversation.id, companyId: input.companyId, status: ConversationStatus.OPEN, assignedUserId: null, isTransferred: false, fallbackAssignedAt: null },
             data: { assignedUserId: company.defaultTechnicianId, status: ConversationStatus.ASSIGNED, assignedAt: conversation.assignedAt ?? new Date(), fallbackAssignedAt: new Date() },
         });
         if (!claimed.count) return;

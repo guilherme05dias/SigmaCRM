@@ -79,6 +79,7 @@ interface SystemSettings {
     welcomeMessage?: string | null;
     awayMessage?: string | null;
     closingMessage?: string | null;
+    inactivityClosingMessage?: string | null;
     externalServiceGroupId?: string | null;
     externalServiceGroupName?: string | null;
 }
@@ -97,7 +98,8 @@ const defaultSettings: SystemSettings = {
     businessHours: defaultBusinessHours,
     welcomeMessage: 'Olá! Seja bem-vindo à Sigma Atendimento. Em instantes um de nossos consultores irá falar com você.',
     awayMessage: 'No momento estamos fora do nosso horário de atendimento. Deixe sua mensagem e retornaremos assim que possível. Nosso horário é das 08:00 às 18:00.',
-    closingMessage: 'Atendimento encerrado. Se precisar de algo, envie uma nova mensagem.',
+    closingMessage: 'Atendimento encerrado. Se precisar de algo, envie uma nova mensagem.\n\nDe 1 a 10, qual nota você dá para este atendimento? Responda apenas com um número.',
+    inactivityClosingMessage: 'Encerramos este atendimento por falta de resposta. Quando precisar, envie uma nova mensagem e retomaremos o atendimento.',
 };
 
 function normalizeBusinessHours(value: unknown): BusinessHour[] {
@@ -184,6 +186,7 @@ export default function Settings() {
                     welcomeMessage: data.welcomeMessage ?? defaultSettings.welcomeMessage,
                     awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
                     closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
+                    inactivityClosingMessage: data.inactivityClosingMessage ?? defaultSettings.inactivityClosingMessage,
                     externalServiceGroupId: data.externalServiceGroupId ?? null,
                     externalServiceGroupName: data.externalServiceGroupName ?? null,
                 });
@@ -210,6 +213,7 @@ export default function Settings() {
                 welcomeMessage: data.welcomeMessage ?? defaultSettings.welcomeMessage,
                 awayMessage: data.awayMessage ?? defaultSettings.awayMessage,
                 closingMessage: data.closingMessage ?? defaultSettings.closingMessage,
+                inactivityClosingMessage: data.inactivityClosingMessage ?? defaultSettings.inactivityClosingMessage,
                 externalServiceGroupId: data.externalServiceGroupId ?? null,
                 externalServiceGroupName: data.externalServiceGroupName ?? null,
             });
@@ -602,6 +606,28 @@ export default function Settings() {
                                     onChange={(event) => setSettings((current) => ({ ...current, awayMessage: event.target.value }))}
                                 />
                                 <p className="text-[10px] text-muted-foreground">Enviada automaticamente fora do horário configurado.</p>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label htmlFor="closing-message" className="text-sm font-bold text-foreground">Mensagem de encerramento com avaliação</label>
+                                <textarea
+                                    id="closing-message"
+                                    maxLength={1000}
+                                    className="min-h-[120px] w-full resize-none rounded-xl border border-border bg-surface p-4 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                    value={settings.closingMessage || ''}
+                                    onChange={(event) => setSettings((current) => ({ ...current, closingMessage: event.target.value }))}
+                                />
+                                <p className="text-xs leading-5 text-muted-foreground">Inclua no mesmo texto a despedida e a pergunta da nota. A resposta numérica será registrada automaticamente.</p>
+                            </div>
+                            <div className="flex flex-col gap-2">
+                                <label htmlFor="inactivity-closing-message" className="text-sm font-bold text-foreground">Encerramento por inatividade</label>
+                                <textarea
+                                    id="inactivity-closing-message"
+                                    maxLength={1000}
+                                    className="min-h-[120px] w-full resize-none rounded-xl border border-border bg-surface p-4 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                    value={settings.inactivityClosingMessage || ''}
+                                    onChange={(event) => setSettings((current) => ({ ...current, inactivityClosingMessage: event.target.value }))}
+                                />
+                                <p className="text-xs leading-5 text-muted-foreground">Usada quando o cliente parou de responder. Não solicita avaliação.</p>
                             </div>
                             </div>
                             )}

@@ -315,7 +315,7 @@ export default function Customers() {
             const deleted = result.deleted;
             showToast({
                 title: 'Dados do contato apagados',
-                description: `${deleted.contacts} contato, ${deleted.conversations} conversas, ${deleted.messages} mensagens e ${deleted.tickets} tickets removidos.`,
+                description: `${deleted.contacts} contato, ${deleted.conversations} Atendimentos, ${deleted.messages} mensagens e ${deleted.tickets} Chamados removidos.`,
                 variant: 'success',
             });
             setLgpdTarget(null);
@@ -359,7 +359,7 @@ export default function Customers() {
                                 <p className="mt-2 text-2xl font-bold text-warning">{stats.negotiation}</p>
                             </div>
                             <div className="rounded-xl border border-border bg-surface p-4 shadow-card">
-                                <p className="text-xs uppercase tracking-wider text-muted-foreground">Tickets</p>
+                                <p className="text-xs uppercase tracking-wider text-muted-foreground">Chamados</p>
                                 <p className="mt-2 text-2xl font-bold text-primary">{stats.tickets}</p>
                             </div>
                         </div>
@@ -448,7 +448,7 @@ export default function Customers() {
                                                 </td>
                                                 <td className="px-5 py-4 text-sm text-muted-foreground">
                                                     <div>
-                                                        <p>{(customer._count?.contacts || 0)} contatos · {(customer._count?.tickets || 0)} tickets</p>
+                                                        <p>{(customer._count?.contacts || 0)} contatos · {(customer._count?.tickets || 0)} Chamados</p>
                                                         {(contactsByCustomer.get(customer.id) || []).length > 0 && (
                                                             <div className="mt-2 flex flex-col gap-2">
                                                                 {(contactsByCustomer.get(customer.id) || []).slice(0, 3).map((contact) => (
@@ -514,7 +514,7 @@ export default function Customers() {
                     <aside className="rounded-xl border border-border bg-surface p-5 shadow-card h-fit">
                         <div className="mb-5">
                             <h2 className="text-lg font-bold text-foreground">{editingId ? 'Editar cliente' : 'Novo cliente'}</h2>
-                            <p className="mt-1 text-sm text-muted-foreground">Dados comerciais usados nos contatos, tickets e relatórios.</p>
+                            <p className="mt-1 text-sm text-muted-foreground">Dados comerciais usados nos contatos, Chamados e relatórios.</p>
                         </div>
 
                         <form onSubmit={handleSubmit} className="space-y-4">
@@ -640,7 +640,7 @@ export default function Customers() {
                             <div>
                                 <h2 id="lgpd-delete-title" className="text-lg font-bold text-foreground">Apagar dados do contato</h2>
                                 <p id="lgpd-delete-description" className="mt-1 text-sm text-muted-foreground">
-                                    Esta acao remove o contato, conversas, mensagens, tickets, avaliacoes, eventos de WhatsApp e mensagens pendentes vinculadas.
+                                    Esta ação remove o contato, Atendimentos, mensagens, Chamados, avaliações, eventos de WhatsApp e mensagens pendentes vinculadas.
                                 </p>
                             </div>
                         </div>

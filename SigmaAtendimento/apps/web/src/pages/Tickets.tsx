@@ -512,7 +512,7 @@ function ManualTicketModal({
                             />
                             <span>
                                 <span className="block text-sm font-semibold text-foreground">Criar como atendimento externo / agenda</span>
-                                <span className="block text-xs text-muted-foreground">Use para visita tecnica, instalacao, treinamento ou atendimento agendado.</span>
+                                <span className="block text-xs text-muted-foreground">Use para um Chamado técnico, instalação, treinamento ou atendimento agendado.</span>
                             </span>
                         </label>
 

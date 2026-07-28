@@ -1,5 +1,6 @@
 import { FormEvent, lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import type { Conversation, Message, OutgoingMessagePayload, QuotedMessage } from './types';
 import { Button } from '../ui/Button';
 import { useDialogFocus } from '../../hooks/useDialogFocus';
@@ -13,6 +14,7 @@ import type { AuthUser } from '../../lib/auth';
 import { contactDisplayName } from './contactDisplayName';
 
 const TicketFromConvModal = lazy(() => import('./TicketFromConvModal').then((module) => ({ default: module.TicketFromConvModal })));
+type ConversationClosureMode = 'WITH_RATING' | 'INACTIVITY' | 'SILENT';
 
 interface ChatWindowProps {
     currentUser: AuthUser | null;
@@ -36,7 +38,7 @@ interface ChatWindowProps {
         otherTopicDescription?: string | null;
         notes?: string | null;
         fieldServiceRequired?: boolean;
-        sendSatisfactionSurvey?: boolean;
+        closureMode: ConversationClosureMode;
     }) => Promise<void>;
     onCreateTicket: (payload: {
         title: string;
@@ -54,6 +56,9 @@ interface ChatWindowProps {
     createTicketError: string | null;
     departments: Array<{ id: string; name: string; active?: boolean }>;
     serviceTopics: Array<{ id: string; name: string; description?: string | null; active?: boolean }>;
+    isLoadingServiceTopics: boolean;
+    serviceTopicsError: string | null;
+    onReloadServiceTopics: () => Promise<void>;
     technicians: Array<{ id: string; name: string; active?: boolean }>;
     hasMore: boolean;
     onLoadMore: () => void;
@@ -314,6 +319,9 @@ export function ChatWindow({
     createTicketError,
     departments,
     serviceTopics,
+    isLoadingServiceTopics,
+    serviceTopicsError,
+    onReloadServiceTopics,
     technicians,
     hasMore,
     onLoadMore,
@@ -321,6 +329,7 @@ export function ChatWindow({
     isRefreshing,
     lastSyncedAt,
 }: ChatWindowProps) {
+    const navigate = useNavigate();
     const [body, setBody] = useState('');
     const [attachment, setAttachment] = useState<SelectedAttachment | null>(null);
     const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -331,6 +340,7 @@ export function ChatWindow({
     const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
     const [messageActionMenuId, setMessageActionMenuId] = useState<string | null>(null);
     const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
+    const [showScrollToBottom, setShowScrollToBottom] = useState(false);
     const [departmentId, setDepartmentId] = useState('');
     const [ticketModalOpen, setTicketModalOpen] = useState(false);
     const [closeModalOpen, setCloseModalOpen] = useState(false);
@@ -339,6 +349,7 @@ export function ChatWindow({
         resetCloseForm();
     });
     const [closeForm, setCloseForm] = useState({
+        closureMode: '' as ConversationClosureMode | '',
         result: '',
         summary: '',
         serviceTopicId: '',
@@ -346,7 +357,6 @@ export function ChatWindow({
         otherTopicDescription: '',
         notes: '',
         fieldServiceRequired: false,
-        sendSatisfactionSurvey: true,
     });
     const [closeError, setCloseError] = useState<string | null>(null);
 
@@ -382,6 +392,7 @@ export function ChatWindow({
         if (isLoading) return;
         if (conversation?.id !== prevConvIdRef.current) {
             prevConvIdRef.current = conversation?.id ?? null;
+            setShowScrollToBottom(false);
             requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: 'instant' }));
         }
     }, [conversation?.id, isLoading]);
@@ -393,10 +404,24 @@ export function ChatWindow({
         if (!grew || isLoading) return;
         const c = containerRef.current;
         if (!c) return;
-        if (c.scrollHeight - c.scrollTop - c.clientHeight < 200) {
+        const distanceFromBottom = c.scrollHeight - c.scrollTop - c.clientHeight;
+        if (distanceFromBottom < 200) {
             bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        } else {
+            setShowScrollToBottom(true);
         }
     }, [messages]);
+
+    const handleMessagesScroll = () => {
+        const container = containerRef.current;
+        if (!container) return;
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+        setShowScrollToBottom(distanceFromBottom > 200);
+    };
+
+    const scrollToBottom = () => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    };
 
     /* Auto-resize do textarea */
     const handleBodyChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -707,18 +732,9 @@ export function ChatWindow({
 
     const canAct = canReply;
 
-    const handleCloseConversation = async () => {
-        const ok = window.confirm('Deseja encerrar esta conversa? O cliente receberá a mensagem de encerramento configurada.');
-        if (!ok) return;
-        await onCloseConversation({
-            result: 'ENCERRADO',
-            summary: 'Atendimento encerrado.',
-            serviceTopicId: serviceTopics[0]?.id || '',
-        });
-    };
-
     const resetCloseForm = () => {
         setCloseForm({
+            closureMode: '',
             result: '',
             summary: '',
             serviceTopicId: '',
@@ -726,12 +742,12 @@ export function ChatWindow({
             otherTopicDescription: '',
             notes: '',
             fieldServiceRequired: false,
-            sendSatisfactionSurvey: true,
         });
         setCloseError(null);
     };
 
     const selectedTopic = serviceTopics.find((topic) => topic.id === closeForm.serviceTopicId);
+    const activeServiceTopics = serviceTopics.filter((topic) => topic.active ?? true);
     const requiresOtherDescription = selectedTopic?.name.trim().toLowerCase() === 'outro';
     const customerBusinesses = conversation.contact.customer?.businesses ?? [];
 
@@ -743,14 +759,15 @@ export function ChatWindow({
                 || current.customerBusinessId,
         }));
         setCloseModalOpen(true);
+        void onReloadServiceTopics();
     };
 
     const submitCloseConversation = async (event: FormEvent) => {
         event.preventDefault();
         setCloseError(null);
 
-        if (!closeForm.result.trim() || !closeForm.summary.trim() || !closeForm.serviceTopicId) {
-            setCloseError('Informe resultado, resumo e sistema/assunto.');
+        if (!closeForm.closureMode || !closeForm.result.trim() || !closeForm.summary.trim() || !closeForm.serviceTopicId) {
+            setCloseError('Escolha como encerrar e informe resultado, resumo e sistema/assunto.');
             return;
         }
 
@@ -772,7 +789,7 @@ export function ChatWindow({
             otherTopicDescription: closeForm.otherTopicDescription.trim() || null,
             notes: closeForm.notes.trim() || null,
             fieldServiceRequired: closeForm.fieldServiceRequired,
-            sendSatisfactionSurvey: closeForm.sendSatisfactionSurvey,
+            closureMode: closeForm.closureMode,
         });
         setCloseModalOpen(false);
         resetCloseForm();
@@ -803,8 +820,8 @@ export function ChatWindow({
         <section className={`${conversation ? 'flex' : 'hidden md:flex'} min-h-0 min-w-0 flex-1 flex-col bg-background`}>
 
             {/* ══ Header ══════════════════════════════════════════════ */}
-            <header className="sigma-chat-header flex flex-wrap shrink-0 items-center justify-between gap-3 border-b border-border bg-surface py-2.5 pl-[68px] pr-3 md:px-4">
-                <div className="sigma-chat-contact flex min-w-0 items-center gap-3">
+            <header className="sigma-chat-header flex shrink-0 items-center gap-3 border-b border-border bg-surface py-2.5 pl-[68px] pr-3 md:px-4">
+                <div className="sigma-chat-contact flex min-w-0 flex-1 items-center gap-3">
                     {onBack && (
                         <button
                             type="button"
@@ -844,113 +861,144 @@ export function ChatWindow({
 
                 {/* Ações */}
                 <div className="sigma-chat-actions flex shrink-0 items-center justify-end gap-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        loading={isSyncingHistory}
-                        onClick={() => void onSyncHistory()}
-                        aria-label="Importar histórico"
-                        title="Importar histórico"
-                        className="sigma-chat-action-button"
-                    >
-                        {!isSyncingHistory && <Icon name="history" className="size-5" />}
-                        <span className="sigma-chat-action-label">Importar histórico</span>
-                    </Button>
-                    {canAct && (
+                    <div className="sigma-chat-action-group" role="group" aria-label="Ações da conversa">
                         <Button
                             type="button"
                             variant="outline"
                             size="icon"
-                            onClick={() => setTicketModalOpen(true)}
-                            aria-label="Criar chamado"
-                            title="Criar chamado"
-                            className="sigma-chat-action-button"
+                            loading={isSyncingHistory}
+                            onClick={() => void onSyncHistory()}
+                            aria-label="Importar histórico"
+                            title="Importar histórico"
+                            className="sigma-chat-action-button sigma-chat-action-button--secondary"
                         >
-                            <Icon name="add_ticket" className="size-5" />
-                            <span className="sigma-chat-action-label">Criar chamado</span>
+                            {!isSyncingHistory && <Icon name="history" className="size-5" />}
+                            <span className="sigma-chat-action-label sigma-chat-action-label--secondary">Importar histórico</span>
                         </Button>
-                    )}
+                        {canAct && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => navigate(`/tasks?new=1&conversationId=${conversation.id}&contactId=${conversation.contactId}${conversation.serviceTopicId ? `&serviceTopicId=${conversation.serviceTopicId}` : ''}`)}
+                                aria-label="Criar tarefa"
+                                title="Criar tarefa"
+                                className="sigma-chat-action-button sigma-chat-action-button--primary"
+                            >
+                                <Icon name="task_list" className="size-5" />
+                                <span className="sigma-chat-action-label sigma-chat-action-label--primary">Criar tarefa</span>
+                            </Button>
+                        )}
+                        {canAct && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                onClick={() => setTicketModalOpen(true)}
+                                aria-label="Criar chamado"
+                                title="Criar chamado"
+                                className="sigma-chat-action-button sigma-chat-action-button--primary"
+                            >
+                                <Icon name="add_ticket" className="size-5" />
+                                <span className="sigma-chat-action-label sigma-chat-action-label--primary">Criar chamado</span>
+                            </Button>
+                        )}
+                    </div>
+
+                    {canAct && <span className="sigma-chat-action-divider" aria-hidden="true" />}
+
                     {canAct && (
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            loading={isClosingConversation}
-                            onClick={openCloseModal}
-                            aria-label="Encerrar atendimento"
-                            title="Encerrar atendimento"
-                            className="sigma-chat-action-button"
-                        >
-                            {!isClosingConversation && <Icon name="call_end" className="size-5" />}
-                            <span className="sigma-chat-action-label">Encerrar</span>
-                        </Button>
-                    )}
-                    {canAct && departments.length > 0 && (
-                        <label
-                            className="sigma-chat-transfer-compact relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-alt hover:text-foreground"
-                            title="Transferir atendimento"
-                        >
-                            <Icon name="swap_horiz" className="size-5" />
-                            <select
-                                value=""
-                                onChange={(e) => { if (e.target.value) onTransfer(e.target.value); }}
-                                aria-label="Transferir atendimento para outro departamento"
-                                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        <div className="sigma-chat-action-group" role="group" aria-label="Gerenciar atendimento">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                loading={isClosingConversation}
+                                onClick={openCloseModal}
+                                aria-label="Encerrar atendimento"
+                                title="Encerrar atendimento"
+                                className="sigma-chat-action-button sigma-chat-action-button--secondary"
                             >
-                                <option value="">Transferir atendimento</option>
-                                {departments.filter((d) => d.active ?? true).map((d) => (
-                                    <option key={d.id} value={d.id}>{d.name}</option>
-                                ))}
-                            </select>
-                        </label>
+                                {!isClosingConversation && <Icon name="call_end" className="size-5" />}
+                                <span className="sigma-chat-action-label sigma-chat-action-label--secondary">Encerrar</span>
+                            </Button>
+
+                            {departments.length > 0 && (
+                                <label
+                                    className="sigma-chat-transfer-compact relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-alt hover:text-foreground"
+                                    title="Transferir atendimento"
+                                >
+                                    <Icon name="swap_horiz" className="size-5" />
+                                    <select
+                                        value=""
+                                        onChange={(e) => { if (e.target.value) onTransfer(e.target.value); }}
+                                        aria-label="Transferir atendimento para outro departamento"
+                                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                                    >
+                                        <option value="">Transferir atendimento</option>
+                                        {departments.filter((d) => d.active ?? true).map((d) => (
+                                            <option key={d.id} value={d.id}>{d.name}</option>
+                                        ))}
+                                    </select>
+                                </label>
+                            )}
+
+                            {departments.length > 0 && (
+                                <form
+                                    onSubmit={(e) => { e.preventDefault(); if (departmentId) onTransfer(departmentId); }}
+                                    className="sigma-chat-transfer-wide items-center gap-2"
+                                >
+                                    <select
+                                        value={departmentId}
+                                        onChange={(e) => setDepartmentId(e.target.value)}
+                                        aria-label="Departamento de destino"
+                                        className="sigma-chat-transfer-select min-h-11 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                    >
+                                        <option value="">Transferir para...</option>
+                                        {departments.filter((d) => d.active ?? true).map((d) => (
+                                            <option key={d.id} value={d.id}>{d.name}</option>
+                                        ))}
+                                    </select>
+                                    <Button
+                                        type="submit"
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={!departmentId}
+                                        className="sigma-chat-transfer-submit"
+                                    >
+                                        Transferir
+                                    </Button>
+                                </form>
+                            )}
+                        </div>
                     )}
-                    {canAct && departments.length > 0 && (
-                        <form
-                            onSubmit={(e) => { e.preventDefault(); if (departmentId) onTransfer(departmentId); }}
-                            className="sigma-chat-transfer-wide items-center gap-2"
-                        >
-                            <select
-                                value={departmentId}
-                                onChange={(e) => setDepartmentId(e.target.value)}
-                                aria-label="Departamento de destino"
-                                className="min-h-11 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
-                            >
-                                <option value="">Transferir para...</option>
-                                {departments.filter((d) => d.active ?? true).map((d) => (
-                                    <option key={d.id} value={d.id}>{d.name}</option>
-                                ))}
-                            </select>
-                            <button
-                                type="submit"
-                                disabled={!departmentId}
-                                className="min-h-11 rounded-full border border-border bg-surface px-3 py-2 text-sm font-semibold text-muted-foreground transition-colors hover:bg-surface-alt hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                                Transferir
-                            </button>
-                        </form>
-                    )}
+
                     {conversation.status === 'OPEN' && (
-                        <button
-                            type="button"
-                            onClick={onTake}
-                            aria-label="Assumir esta conversa"
-                            title="Assumir esta conversa"
-                            className="sigma-chat-action-button inline-flex h-11 w-11 shrink-0 items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white transition-colors hover:brightness-95"
-                            style={{ background: 'var(--c-chat-action)' }}
-                        >
-                            <Icon name="person_check" className="size-5" />
-                            <span className="sigma-chat-action-label">Assumir conversa</span>
-                        </button>
+                        <>
+                            <span className="sigma-chat-action-divider" aria-hidden="true" />
+                            <button
+                                type="button"
+                                onClick={onTake}
+                                aria-label="Assumir esta conversa"
+                                title="Assumir esta conversa"
+                                className="sigma-chat-action-button sigma-chat-action-button--secondary inline-flex h-11 w-11 shrink-0 items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white transition-colors hover:brightness-95"
+                                style={{ background: 'var(--c-chat-action)' }}
+                            >
+                                <Icon name="person_check" className="size-5" />
+                                <span className="sigma-chat-action-label sigma-chat-action-label--secondary">Assumir conversa</span>
+                            </button>
+                        </>
                     )}
                 </div>
             </header>
 
             {/* ══ Área de mensagens ═══════════════════════════════════ */}
-            <div
-                ref={containerRef}
-                className="sigma-chat-surface flex-1 overflow-y-auto scrollbar-thin px-3 py-4 md:px-6"
-            >
+            <div className="relative min-h-0 flex-1">
+                <div
+                    ref={containerRef}
+                    onScroll={handleMessagesScroll}
+                    className="sigma-chat-surface h-full overflow-y-auto scrollbar-thin px-3 py-4 md:px-6"
+                >
                 {/* Botão de carregar mais */}
                 {hasMore && (
                     <div className="mb-4 flex justify-center">
@@ -1215,7 +1263,20 @@ export function ChatWindow({
                 ))}
 
                 {/* Sentinel para scroll-to-bottom */}
-                <div ref={bottomRef} className="h-1" />
+                    <div ref={bottomRef} className="h-1" />
+                </div>
+
+                {showScrollToBottom && (
+                    <button
+                        type="button"
+                        onClick={scrollToBottom}
+                        aria-label="Ir para o final da conversa"
+                        title="Ir para o final da conversa"
+                        className="absolute bottom-3 right-3 z-10 inline-flex size-11 items-center justify-center rounded-full border border-border bg-elevated text-muted-foreground shadow-md transition-colors hover:border-primary/40 hover:text-primary md:bottom-4 md:right-5"
+                    >
+                        <Icon name="arrow_down" className="size-5" strokeWidth={2.25} />
+                    </button>
+                )}
             </div>
 
             {/* ══ Barra de envio ══════════════════════════════════════ */}
@@ -1485,7 +1546,7 @@ export function ChatWindow({
                             <div>
                                 <h2 id="close-conversation-title" className="text-lg font-bold text-foreground">Finalizar atendimento</h2>
                                 <p className="mt-1 text-sm text-muted-foreground">
-                                    Registre empresa, sistema e resumo antes de encerrar. A conversa será removida após o envio da despedida.
+                                    Registre o resultado e escolha exatamente o que será enviado ao cliente.
                                 </p>
                             </div>
                             <button
@@ -1505,6 +1566,26 @@ export function ChatWindow({
                                 </div>
                             )}
 
+                            <fieldset>
+                                <legend className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Como deseja encerrar?</legend>
+                                <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+                                    {([
+                                        ['WITH_RATING', 'Encerrar com a avaliação', 'Envia a mensagem de encerramento e solicita uma nota de 1 a 10.'],
+                                        ['INACTIVITY', 'Encerrar por inatividade/sem resposta', 'Envia somente a mensagem de encerramento, sem solicitar avaliação.'],
+                                        ['SILENT', 'Encerrar sem mandar mensagem', 'Apenas fecha o atendimento e envia para o histórico.'],
+                                    ] as const).map(([value, label, description]) => {
+                                        const disabled = value === 'WITH_RATING' && conversation.contact.includeInServiceReports === false;
+                                        const selected = closeForm.closureMode === value;
+                                        return (
+                                            <label key={value} className={`flex min-h-16 items-start gap-3 px-3 py-3 transition-colors ${disabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer hover:bg-surface-alt'} ${selected ? 'bg-primary-50' : 'bg-surface'}`}>
+                                                <input type="radio" name="closureMode" value={value} checked={selected} disabled={disabled} onChange={() => setCloseForm({ ...closeForm, closureMode: value })} className="mt-1 size-4 accent-primary" />
+                                                <span><span className="block text-sm font-semibold text-foreground">{label}</span><span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{disabled ? 'A avaliação está desativada no cadastro deste contato.' : description}</span></span>
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            </fieldset>
+
                             <label className="block">
                                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Resultado</span>
                                 <select
@@ -1515,7 +1596,7 @@ export function ChatWindow({
                                 >
                                     <option value="">Selecione</option>
                                     <option value="RESOLVIDO">Resolvido</option>
-                                    <option value="ENCAMINHADO_VISITA">Encaminhado para visita</option>
+                                    <option value="ENCAMINHADO_VISITA">Convertido em chamado</option>
                                     <option value="PENDENTE_CLIENTE">Pendente com cliente</option>
                                     <option value="SEM_SOLUCAO">Sem solucao no atendimento</option>
                                 </select>
@@ -1550,14 +1631,42 @@ export function ChatWindow({
                                     value={closeForm.serviceTopicId}
                                     onChange={(event) => setCloseForm({ ...closeForm, serviceTopicId: event.target.value })}
                                     required
+                                    disabled={isLoadingServiceTopics && activeServiceTopics.length === 0}
                                     className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30"
                                 >
-                                    <option value="">Selecione</option>
-                                    {serviceTopics.filter((topic) => topic.active ?? true).map((topic) => (
+                                    <option value="">
+                                        {isLoadingServiceTopics && activeServiceTopics.length === 0
+                                            ? 'Carregando sistemas...'
+                                            : 'Selecione'}
+                                    </option>
+                                    {activeServiceTopics.map((topic) => (
                                         <option key={topic.id} value={topic.id}>{topic.name}</option>
                                     ))}
                                 </select>
+                                {isLoadingServiceTopics && activeServiceTopics.length > 0 && (
+                                    <span className="mt-1.5 block text-xs text-muted-foreground" role="status">
+                                        Atualizando a lista de sistemas...
+                                    </span>
+                                )}
                             </label>
+
+                            {serviceTopicsError && (
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-danger/20 bg-danger-soft px-3 py-2.5 text-sm text-danger-fg" role="alert">
+                                    <span>Não foi possível carregar os sistemas e assuntos.</span>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => void onReloadServiceTopics()}>
+                                        Tentar novamente
+                                    </Button>
+                                </div>
+                            )}
+
+                            {!isLoadingServiceTopics && !serviceTopicsError && activeServiceTopics.length === 0 && (
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-alt px-3 py-2.5 text-sm text-muted-foreground">
+                                    <span>Nenhum sistema ou assunto ativo foi encontrado.</span>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => void onReloadServiceTopics()}>
+                                        Atualizar lista
+                                    </Button>
+                                </div>
+                            )}
 
                             {requiresOtherDescription && (
                                 <label className="block">
@@ -1601,33 +1710,15 @@ export function ChatWindow({
                                     onChange={(event) => setCloseForm({ ...closeForm, fieldServiceRequired: event.target.checked })}
                                     className="h-4 w-4 accent-primary"
                                 />
-                                Foi necessario abrir chamado/visita presencial
-                            </label>
-
-                            <label className="flex items-start gap-2 rounded-lg bg-surface-alt px-3 py-2.5 text-sm text-foreground">
-                                <input
-                                    type="checkbox"
-                                    checked={conversation.contact.includeInServiceReports !== false && closeForm.sendSatisfactionSurvey}
-                                    disabled={conversation.contact.includeInServiceReports === false}
-                                    onChange={(event) => setCloseForm({ ...closeForm, sendSatisfactionSurvey: event.target.checked })}
-                                    className="mt-0.5 h-4 w-4 accent-primary disabled:opacity-50"
-                                />
-                                <span>
-                                    <span className="block font-medium">Solicitar avaliação do atendimento</span>
-                                    <span className="block text-xs text-muted-foreground">
-                                        {conversation.contact.includeInServiceReports === false
-                                            ? 'Desativada no cadastro deste contato interno.'
-                                            : 'O cliente receberá uma pergunta para dar uma nota de 1 a 10.'}
-                                    </span>
-                                </span>
+                                Foi necessário abrir um Chamado técnico
                             </label>
 
                             <div className="flex justify-end gap-3 pt-2">
                                 <Button type="button" variant="outline" onClick={() => { setCloseModalOpen(false); resetCloseForm(); }}>
                                     Cancelar
                                 </Button>
-                                <Button type="submit" loading={isClosingConversation}>
-                                    Finalizar atendimento
+                                <Button type="submit" loading={isClosingConversation} disabled={!closeForm.closureMode}>
+                                    {closeForm.closureMode === 'WITH_RATING' ? 'Encerrar com avaliação' : closeForm.closureMode === 'INACTIVITY' ? 'Encerrar por inatividade' : closeForm.closureMode === 'SILENT' ? 'Fechar sem mensagem' : 'Escolha como encerrar'}
                                 </Button>
                             </div>
                         </form>
