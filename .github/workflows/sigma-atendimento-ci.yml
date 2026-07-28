@@ -16,6 +16,11 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      # O Prisma exige URLs sintaticamente válidas para validar o schema.
+      # Nenhuma conexão é aberta durante generate/validate/typecheck.
+      DATABASE_URL: postgresql://sigma:sigma@127.0.0.1:5432/sigma
+      DIRECT_URL: postgresql://sigma:sigma@127.0.0.1:5432/sigma
     defaults:
       run:
         working-directory: SigmaAtendimento
