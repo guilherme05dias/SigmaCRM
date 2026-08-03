@@ -8,8 +8,11 @@ import { scheduleConversationFallback } from './conversationFallback.service';
 import { invalidateProviderUnreadCounts } from './providerUnread.service';
 import { getDefaultDepartmentId } from './defaultDepartment.service';
 
-const DEFAULT_INTERVAL_MS = 60_000;
-const MINIMUM_INTERVAL_MS = 15_000;
+// A reconciliação é uma rede de segurança para webhooks perdidos, não um
+// mecanismo de polling em tempo real. Um intervalo curto consultando centenas
+// de chats consumia rapidamente a franquia de egress das Edge Functions.
+const DEFAULT_INTERVAL_MS = 5 * 60_000;
+const MINIMUM_INTERVAL_MS = 60_000;
 const DEFAULT_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const MAX_CANDIDATES_PER_RUN = 20;
 const HISTORY_MESSAGE_LIMIT = 100;

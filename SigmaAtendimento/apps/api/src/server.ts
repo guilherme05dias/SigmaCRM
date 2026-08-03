@@ -79,7 +79,10 @@ app.get('/health', async (_req, res) => {
     const webhookDatabase = await checkUazApiWebhookDatabaseHealth();
     const reconciliation = getUazApiReconciliationHealth();
     const healthy = webhookDatabase.healthy && reconciliation.healthy;
-    res.status(healthy ? 200 : 503).json({
+    // Render usa esta rota como liveness check. Falhas nas integrações de
+    // WhatsApp devem aparecer como estado degradado, mas não podem derrubar a
+    // API inteira (incluindo login e leitura de conversas já persistidas).
+    res.status(200).json({
         status: healthy ? 'ok' : 'degraded',
         timestamp: new Date(),
         checks: {

@@ -196,11 +196,11 @@ export class UazApiWhatsAppProvider implements IWhatsAppProvider {
     async listChatUnreadCounts(): Promise<WhatsAppUnreadChat[]> {
         let chats: WhatsAppUnreadChat[];
         if (this.sendViaSupabaseEdge) {
-            const payload = await this.edgeJson<{ chats?: WhatsAppUnreadChat[] }>({ summaryOnly: true, chatLimit: 500 });
+            const payload = await this.edgeJson<{ chats?: WhatsAppUnreadChat[] }>({ summaryOnly: true, chatLimit: 100 });
             chats = Array.isArray(payload.chats) ? payload.chats : [];
         } else {
             chats = this.collectionItems(await this.postJson("/chat/find", {
-                limit: 500,
+                limit: 100,
                 offset: 0,
                 sort: "-wa_lastMsgTimestamp",
                 wa_isGroup: false,

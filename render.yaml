@@ -35,7 +35,7 @@ services:
       - key: UAZAPI_RECONCILIATION_ENABLED
         value: "true"
       - key: UAZAPI_RECONCILIATION_INTERVAL_MS
-        value: "60000"
+        value: "300000"
       - key: UAZAPI_RECONCILIATION_LOOKBACK_HOURS
         value: "48"
       # O assistente Ollama depende de um modelo local e fica desligado no Render.
