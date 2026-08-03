@@ -31,7 +31,7 @@ services:
       - key: UAZAPI_SEND_TEXT_PATH
         value: /send/text
       - key: UAZAPI_SEND_VIA_SUPABASE_EDGE
-        value: "true"
+        value: "false"
       - key: UAZAPI_RECONCILIATION_ENABLED
         value: "true"
       - key: UAZAPI_RECONCILIATION_INTERVAL_MS
