@@ -227,7 +227,18 @@ function MediaAttachment({ conversationId, message }: { conversationId: string; 
             );
         }
         if (message.type === 'AUDIO') {
-            return <audio controls preload="metadata" src={sourceUrl} onError={() => setDirectFailed(true)} className="mb-1 w-full max-w-xs" aria-label="Áudio recebido" />;
+            return (
+                <div className="mb-1 w-[min(20rem,calc(100vw-5rem))] max-w-full">
+                    <audio
+                        controls
+                        preload="metadata"
+                        src={sourceUrl}
+                        onError={() => setDirectFailed(true)}
+                        className="block h-10 w-full"
+                        aria-label="Áudio recebido"
+                    />
+                </div>
+            );
         }
         if (message.type === 'VIDEO') {
             return <video controls preload="metadata" src={sourceUrl} onError={() => setDirectFailed(true)} className="mb-1 max-h-80 max-w-full rounded-lg" aria-label="Vídeo recebido" />;

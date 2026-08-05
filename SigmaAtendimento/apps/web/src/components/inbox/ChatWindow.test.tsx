@@ -22,6 +22,7 @@ const conversation = {
 };
 
 function renderChatWindow(options: {
+    messages?: any[];
     serviceTopics?: Array<{ id: string; name: string; active?: boolean }>;
     isLoadingServiceTopics?: boolean;
     serviceTopicsError?: string | null;
@@ -33,7 +34,7 @@ function renderChatWindow(options: {
             <ChatWindow
                 currentUser={{ id: 'user-1', name: 'Atendente', role: 'ATTENDANT' } as any}
                 conversation={conversation}
-                messages={[]}
+                messages={options.messages ?? []}
                 isLoading={false}
                 isSubmitting={false}
                 isSyncingHistory={false}
@@ -109,5 +110,32 @@ describe('encerramento do atendimento no WhatsApp', () => {
 
         expect(screen.getByRole('alert').textContent).toContain('Não foi possível carregar');
         expect(onReloadServiceTopics).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('mídias no atendimento', () => {
+    beforeEach(() => {
+        Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+    });
+
+    afterEach(() => cleanup());
+
+    it('mantém o reprodutor de áudio recebido amplo e responsivo', () => {
+        renderChatWindow({
+            messages: [{
+                id: 'audio-1',
+                conversationId: 'conversation-1',
+                direction: 'INBOUND',
+                type: 'AUDIO',
+                body: null,
+                mediaUrl: 'https://example.test/audio.ogg',
+                waMessageId: 'wa-audio-1',
+                createdAt: new Date().toISOString(),
+            }],
+        });
+
+        const audio = screen.getByLabelText('Áudio recebido');
+        expect(audio.className).toContain('w-full');
+        expect(audio.parentElement?.className).toContain('w-[min(20rem,calc(100vw-5rem))]');
     });
 });
