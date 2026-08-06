@@ -3,7 +3,7 @@ import type { Conversation } from './types';
 import { EmptyState } from '../ui/EmptyState';
 import { Skeleton } from '../ui/Skeleton';
 import { ContactAvatar } from './ContactAvatar';
-import { displayMessageBody } from './messagePresentation';
+import { messagePreviewText } from './messagePresentation';
 import { contactDisplayName } from './contactDisplayName';
 
 interface ConversationListProps {
@@ -93,10 +93,11 @@ export function ConversationList({
         const value = query.trim().toLowerCase();
         if (!value) return true;
 
-        const lastMessage = conversation.messages?.[0]?.body || '';
+        const lastMessage = conversation.messages?.[0];
+        const lastMessagePreview = lastMessage ? messagePreviewText(lastMessage) : '';
         const name = conversationName(conversation);
         const phone = conversation.contact?.phone || '';
-        return `${name} ${phone} ${lastMessage}`.toLowerCase().includes(value);
+        return `${name} ${phone} ${lastMessagePreview}`.toLowerCase().includes(value);
     });
 
     const tabItems: Array<[ConversationListProps['activeTab'], string]> = [
@@ -244,8 +245,8 @@ export function ConversationList({
                         const selected = selectedId === conversation.id;
                         const unreadCount = Math.max(0, Number(conversation.unreadCount) || 0);
                         const unreadLabel = `${unreadCount} ${unreadCount === 1 ? 'mensagem não lida' : 'mensagens não lidas'}`;
-                        const previewPrefix = lastMessage?.direction === 'OUTBOUND' ? 'Voce: ' : '';
-                        const previewBody = lastMessage ? displayMessageBody(lastMessage) : '';
+                        const previewPrefix = lastMessage?.direction === 'OUTBOUND' ? 'Você: ' : '';
+                        const previewBody = lastMessage ? messagePreviewText(lastMessage) : '';
                         const preview = previewBody ? `${previewPrefix}${previewBody}` : 'Sem mensagens recentes';
 
                         return (

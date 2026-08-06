@@ -228,13 +228,13 @@ function MediaAttachment({ conversationId, message }: { conversationId: string; 
         }
         if (message.type === 'AUDIO') {
             return (
-                <div className="mb-1 w-[min(20rem,calc(100vw-5rem))] max-w-full">
+                <div className="mb-1 w-full min-w-0">
                     <audio
                         controls
                         preload="metadata"
                         src={sourceUrl}
                         onError={() => setDirectFailed(true)}
-                        className="block h-10 w-full"
+                        className="block h-12 w-full min-w-0"
                         aria-label="Áudio recebido"
                     />
                 </div>
@@ -1099,7 +1099,11 @@ export function ChatWindow({
                                         id={`message-${msg.id}`}
                                         className={`group relative flex rounded-lg transition-shadow ${outbound ? 'justify-end' : 'justify-start'} ${prevSameDir ? 'mt-0.5' : 'mt-2'} ${highlightedMessageId === msg.id ? 'ring-2 ring-primary/40 ring-offset-2 ring-offset-surface-alt' : ''}`}
                                     >
-                                        <div className="relative max-w-[78%] md:max-w-[66%]">
+                                        <div
+                                            className={msg.type === 'AUDIO'
+                                                ? 'relative w-full max-w-[22rem]'
+                                                : 'relative max-w-[78%] md:max-w-[66%]'}
+                                        >
                                         {canAct && !isDeleted && !msg.id.startsWith('local-') && (
                                             <div
                                                 data-message-actions={msg.id}

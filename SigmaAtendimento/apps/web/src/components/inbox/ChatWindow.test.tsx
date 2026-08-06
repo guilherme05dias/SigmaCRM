@@ -135,7 +135,10 @@ describe('mídias no atendimento', () => {
         });
 
         const audio = screen.getByLabelText('Áudio recebido');
+        expect(audio.className).toContain('h-12');
         expect(audio.className).toContain('w-full');
-        expect(audio.parentElement?.className).toContain('w-[min(20rem,calc(100vw-5rem))]');
+        expect(audio.parentElement?.className).toContain('w-full');
+        expect(audio.parentElement?.parentElement?.parentElement?.className).toContain('w-full');
+        expect(audio.parentElement?.parentElement?.parentElement?.className).toContain('max-w-[22rem]');
     });
 });

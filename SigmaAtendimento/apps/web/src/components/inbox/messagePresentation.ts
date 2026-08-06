@@ -15,3 +15,19 @@ export function displayMessageBody(message: Pick<QuotedMessage, 'body' | 'direct
     if (message.direction !== 'OUTBOUND') return body;
     return body.replace(WHATSAPP_SIGNATURE_PREFIX, '').trimStart();
 }
+
+const MEDIA_PREVIEW_LABELS: Record<Exclude<QuotedMessage['type'], 'TEXT'>, string> = {
+    IMAGE: 'Imagem',
+    AUDIO: 'Áudio',
+    VIDEO: 'Vídeo',
+    DOCUMENT: 'Documento',
+};
+
+export function messagePreviewText(
+    message: Pick<QuotedMessage, 'body' | 'direction' | 'type' | 'deletedAt' | 'deletedByCustomer'>,
+): string {
+    const body = displayMessageBody(message).trim();
+    if (body) return body;
+    if (message.type === 'TEXT') return '';
+    return MEDIA_PREVIEW_LABELS[message.type];
+}
