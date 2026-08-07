@@ -13,6 +13,7 @@ export interface AuthUser {
     messageSignature?: string | null;
     department?: { name: string } | null;
     active?: boolean;
+    canViewAllConversations?: boolean;
 }
 
 interface AuthContextValue {
@@ -36,6 +37,7 @@ function decodeTokenUser(token: string): AuthUser | null {
             companyId: payload.companyId,
             departmentId: payload.departmentId,
             active: payload.active,
+            canViewAllConversations: payload.canViewAllConversations,
         };
     } catch {
         return null;

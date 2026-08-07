@@ -49,9 +49,9 @@ interface CloseConversationPayload {
 
 type ManagementScope = 'mine' | 'all';
 
-function canSeeConversation(user: { id: string; role: string } | null, conversation: Conversation, managementScope: ManagementScope) {
+function canSeeConversation(user: { id: string; role: string; canViewAllConversations?: boolean } | null, conversation: Conversation, managementScope: ManagementScope) {
     if (!user) return false;
-    if ((user.role === 'ADMIN' || user.role === 'SUPERVISOR') && managementScope === 'all') return true;
+    if ((user.role === 'ADMIN' || user.role === 'SUPERVISOR' || user.canViewAllConversations) && managementScope === 'all') return true;
     return conversation.status === 'OPEN' || conversation.assignedUser?.id === user.id;
 }
 
@@ -128,7 +128,7 @@ export default function Inbox() {
     const navigate = useNavigate();
     const { user, logout } = useAuth();
     const { showToast } = useToast();
-    const isManager = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR';
+    const isManager = user?.role === 'ADMIN' || user?.role === 'SUPERVISOR' || user?.canViewAllConversations === true;
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
     const [isLoadingConversations, setIsLoadingConversations] = useState(true);

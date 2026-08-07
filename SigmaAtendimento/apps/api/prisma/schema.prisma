@@ -196,6 +196,7 @@ model User {
   departmentId     String?     @map("department_id")
   department       Department? @relation(fields: [departmentId], references: [id])
   active           Boolean     @default(true) @map("ativo")
+  canViewAllConversations Boolean @default(false) @map("can_view_all_conversations")
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 

@@ -53,12 +53,13 @@ router.post('/login', loginIpLimit, loginIdentityLimit, async (req, res) => {
                 departmentId: user.departmentId,
                 name: user.name,
                 email: user.email,
+                canViewAllConversations: user.canViewAllConversations,
             },
             env.jwtSecret,
             { expiresIn: '1d' }
         );
 
-        res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, companyId: user.companyId } });
+        res.json({ token, user: { id: user.id, email: user.email, name: user.name, role: user.role, companyId: user.companyId, canViewAllConversations: user.canViewAllConversations } });
     } catch (error: any) {
         console.error('Login Error:', error);
         if (error?.name === 'ZodError') {
@@ -84,6 +85,7 @@ router.get('/me', authMiddleware, async (req, res) => {
                 companyId: true,
                 departmentId: true,
                 messageSignature: true,
+                canViewAllConversations: true,
                 department: { select: { name: true } },
                 active: true,
             },

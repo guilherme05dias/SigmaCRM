@@ -9,6 +9,7 @@ export interface AuthPayload {
     departmentId?: string | null;
     name?: string;
     email?: string;
+    canViewAllConversations?: boolean;
 }
 
 declare global {

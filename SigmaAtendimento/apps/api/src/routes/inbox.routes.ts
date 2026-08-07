@@ -3,6 +3,7 @@ import { ConversationCloseMode, ConversationStatus, FieldVisitStatus, MessageDir
 import { getIO, emitToCompany } from '../socket';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { canViewAll } from '../middlewares/authorization.middleware';
+import { canOperateConversation as canOperateAssignedConversation, canReadAllConversations } from '../lib/conversationAuthorization';
 import { getCompanyId } from '../lib/tenant';
 import { generateProtocol } from '../services/protocol.service';
 import { prisma } from '../lib/prisma';
@@ -20,7 +21,7 @@ const whatsappProvider = getWhatsAppProvider();
 
 function conversationScope(req: any) {
     const requestedScope = req.query?.scope === 'mine' ? 'mine' : 'all';
-    if (canViewAll(req.user?.role) && requestedScope === 'all') return {};
+    if (canReadAllConversations(req.user) && requestedScope === 'all') return {};
     const userId = req.user?.id;
     if (!userId) return { id: '__NO_USER__' };
 
@@ -33,8 +34,7 @@ function conversationScope(req: any) {
 }
 
 function canOperateConversation(req: any, conversation: { assignedUserId?: string | null }) {
-    if (canViewAll(req.user?.role)) return true;
-    return Boolean(req.user?.id && conversation.assignedUserId === req.user.id);
+    return canOperateAssignedConversation(req.user, conversation);
 }
 
 const GetMessagesSchema = z.object({

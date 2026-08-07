@@ -8,6 +8,13 @@ import Inbox from './Inbox';
 
 const mocks = vi.hoisted(() => ({
     apiRequest: vi.fn(),
+    user: {
+        id: 'user-1',
+        name: 'Atendente',
+        email: 'atendente@sigmapdv.com',
+        role: 'ADMIN',
+        canViewAllConversations: false,
+    },
     onConversationUpdated: null as null | ((conversation: Conversation) => void),
     onMessageNew: null as null | ((message: Message) => void),
     onReconnect: null as null | (() => void),
@@ -23,12 +30,7 @@ vi.mock('../lib/authToken', () => ({
 }));
 vi.mock('../lib/auth', () => ({
     useAuth: () => ({
-        user: {
-            id: 'user-1',
-            name: 'Atendente',
-            email: 'atendente@sigmapdv.com',
-            role: 'ADMIN',
-        },
+        user: mocks.user,
         logout: vi.fn(),
     }),
 }));
@@ -57,11 +59,23 @@ vi.mock('../components/inbox/ConversationList', () => ({
     ConversationList: ({
         conversations,
         onSelect,
+        showManagementScope,
+        managementScope,
+        onManagementScopeChange,
     }: {
         conversations: Conversation[];
         onSelect: (id: string) => void;
+        showManagementScope?: boolean;
+        managementScope?: 'mine' | 'all';
+        onManagementScopeChange?: (scope: 'mine' | 'all') => void;
     }) => (
         <nav aria-label="Conversas disponíveis">
+            {showManagementScope && (
+                <div>
+                    <button type="button" aria-pressed={managementScope === 'mine'} onClick={() => onManagementScopeChange?.('mine')}>Meus atendimentos</button>
+                    <button type="button" aria-pressed={managementScope === 'all'} onClick={() => onManagementScopeChange?.('all')}>Todos</button>
+                </div>
+            )}
             {conversations.map((conversation) => (
                 <button key={conversation.id} type="button" onClick={() => onSelect(conversation.id)}>
                     Abrir {conversation.id}
@@ -136,9 +150,40 @@ describe('estabilidade da conversa aberta durante atualizações', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        Object.assign(mocks.user, {
+            id: 'user-1',
+            name: 'Atendente',
+            email: 'atendente@sigmapdv.com',
+            role: 'ADMIN',
+            canViewAllConversations: false,
+        });
         mocks.onConversationUpdated = null;
         mocks.onMessageNew = null;
         mocks.onReconnect = null;
+    });
+
+    it('@spec:AC-010 mostra Meus atendimentos e Todos para técnico com acesso global', async () => {
+        Object.assign(mocks.user, {
+            id: 'carlos-id',
+            name: 'Carlos Técnico',
+            email: 'carlos@dragonbyte.com',
+            role: 'TECHNICIAN',
+            canViewAllConversations: true,
+        });
+        mocks.apiRequest.mockImplementation((path: string) => {
+            if (path === '/api/conversations?scope=all' || path === '/api/conversations?scope=mine') return Promise.resolve([]);
+            if (path === '/api/departments' || path === '/api/service-topics' || path === '/api/users') return Promise.resolve([]);
+            return Promise.reject(new Error(`Rota inesperada: ${path}`));
+        });
+
+        render(<MemoryRouter><Inbox /></MemoryRouter>);
+
+        expect(await screen.findByRole('button', { name: 'Meus atendimentos' })).toBeVisible();
+        expect(screen.getByRole('button', { name: 'Todos' })).toBeVisible();
+        expect(mocks.apiRequest).toHaveBeenCalledWith('/api/conversations?scope=all');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Meus atendimentos' }));
+        await waitFor(() => expect(mocks.apiRequest).toHaveBeenCalledWith('/api/conversations?scope=mine'));
     });
 
     it('ignora mensagens atrasadas de uma conversa que já não está selecionada', async () => {

@@ -95,7 +95,7 @@ async function main() {
   });
   await setMessageSignature(aRafael.id, 'Rafael Atendimento | Suporte tecnico');
   const aTech = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Carlos Técnico', email: 'carlos@dragonbyte.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Redes e Cabeamento', departmentId: aN2.id },
+    data: { companyId: companyA.id, name: 'Carlos Técnico', email: 'carlos@dragonbyte.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Redes e Cabeamento', departmentId: aN2.id, canViewAllConversations: true },
   });
   await setMessageSignature(aTech.id, 'Carlos Tecnico | Suporte tecnico');
   const aJulia = await prisma.user.create({

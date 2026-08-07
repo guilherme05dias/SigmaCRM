@@ -13,6 +13,7 @@ import { sendMediaWithOutbox, sendTextWithOutbox } from '../services/whatsappOut
 import { getProviderUnreadCounts, setCachedProviderUnreadCount } from '../services/providerUnread.service';
 import { normalizePhone, phoneAliases } from '../lib/phone';
 import { getDefaultDepartmentId } from '../services/defaultDepartment.service';
+import { canOperateConversation as canOperateAssignedConversation, canReadAllConversations } from '../lib/conversationAuthorization';
 
 const router = Router();
 const MESSAGE_EDIT_WINDOW_MS = 15 * 60 * 1000;
@@ -22,7 +23,7 @@ router.use(authMiddleware);
 
 function conversationScope(req: Request) {
     const requestedScope = req.query.scope === 'mine' ? 'mine' : 'all';
-    if (canViewAll(req.user?.role) && requestedScope === 'all') return {};
+    if (canReadAllConversations(req.user) && requestedScope === 'all') return {};
     const userId = req.user?.id;
     if (!userId) return { id: '__NO_USER__' };
 
@@ -49,8 +50,7 @@ function formatMessageSignature(user?: SignatureUser | null) {
 }
 
 function canOperateConversation(req: Request, conversation: { assignedUserId?: string | null }) {
-    if (canViewAll(req.user?.role)) return true;
-    return Boolean(req.user?.id && conversation.assignedUserId === req.user.id);
+    return canOperateAssignedConversation(req.user, conversation);
 }
 
 router.get('/', async (req: Request, res: Response) => {
