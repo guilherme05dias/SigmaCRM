@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { SigmaSidebarIcon } from './SigmaSidebarIcon';
@@ -23,5 +23,22 @@ describe('navegação do técnico em campo', () => {
         expect(screen.getAllByRole('link', { name: 'Tarefas' }).length).toBeGreaterThan(0);
         expect(screen.getAllByRole('link', { name: 'Relatórios' }).length).toBeGreaterThan(0);
         expect(screen.queryByRole('link', { name: 'Atendimentos' })).toBeNull();
+    });
+
+    it('@spec:AC-013 exibe o cargo profissional no perfil sem trocar o papel de acesso', () => {
+        render(
+            <MemoryRouter initialEntries={['/inbox']}>
+                <SigmaSidebarIcon
+                    user={{ id: 'carlos', name: 'Carlos', role: 'ATTENDANT', specialty: 'Consultor Técnico' }}
+                    onLogout={vi.fn()}
+                    collapsible
+                />
+            </MemoryRouter>,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Abrir menu principal' }));
+
+        expect(screen.getByText('Consultor Técnico')).toBeTruthy();
+        expect(screen.queryByText('Gerente Técnico')).toBeNull();
     });
 });

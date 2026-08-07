@@ -8,6 +8,7 @@ export interface AuthUser {
     name: string;
     email: string;
     role: string;
+    specialty?: string | null;
     companyId?: string | null;
     departmentId?: string | null;
     messageSignature?: string | null;
@@ -34,6 +35,7 @@ function decodeTokenUser(token: string): AuthUser | null {
             name: payload.name || 'Usuário',
             email: payload.email || '',
             role: payload.role || 'ATTENDANT',
+            specialty: payload.specialty,
             companyId: payload.companyId,
             departmentId: payload.departmentId,
             active: payload.active,

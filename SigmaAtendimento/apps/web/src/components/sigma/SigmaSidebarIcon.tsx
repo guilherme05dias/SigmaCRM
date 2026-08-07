@@ -216,7 +216,7 @@ export function SigmaSidebarIcon({ user, onLogout, collapsible = false }: SigmaS
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <p className="truncate text-sm font-semibold text-foreground">{user?.name || 'Usuário'}</p>
-                                        <p className="truncate text-xs text-muted-foreground">{user?.role || 'Atendente'}</p>
+                                        <p className="truncate text-xs text-muted-foreground">{user?.specialty || user?.role || 'Atendente'}</p>
                                     </div>
                                     <button
                                         type="button"
@@ -385,7 +385,7 @@ export function SigmaSidebarIcon({ user, onLogout, collapsible = false }: SigmaS
                                     Sair
                                 </button>
                             </div>
-                            <p className="truncate px-3 pb-1 pt-2 text-xs text-muted-foreground">{user?.name || 'Usuário'} · {user?.role || 'Atendente'}</p>
+                            <p className="truncate px-3 pb-1 pt-2 text-xs text-muted-foreground">{user?.name || 'Usuário'} · {user?.specialty || user?.role || 'Atendente'}</p>
                         </div>
                     )}
                 </div>

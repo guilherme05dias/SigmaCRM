@@ -144,7 +144,7 @@ export function SigmaTopbar({ user, onLogout }: SigmaTopbarProps) {
                     <div className="flex items-center gap-3">
                         <div className="hidden text-right lg:block">
                             <p className="text-sm font-semibold text-foreground">{user?.name || 'Usuario'}</p>
-                            <p className="text-xs text-muted-foreground">{user?.role || 'Atendente'}</p>
+                            <p className="text-xs text-muted-foreground">{user?.specialty || user?.role || 'Atendente'}</p>
                         </div>
                         <div className="relative">
                             <button

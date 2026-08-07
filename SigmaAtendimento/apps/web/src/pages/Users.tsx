@@ -24,6 +24,7 @@ interface UserItem {
     name: string;
     email: string;
     role: Role;
+    specialty?: string | null;
     messageSignature?: string | null;
     departmentId?: string | null;
     department?: DepartmentItem | null;
@@ -35,6 +36,7 @@ interface UserFormState {
     email: string;
     password: string;
     role: Role;
+    specialty: string;
     messageSignature: string;
     departmentId: string;
     active: boolean;
@@ -45,6 +47,7 @@ const initialForm: UserFormState = {
     email: '',
     password: '',
     role: 'ATTENDANT',
+    specialty: '',
     messageSignature: '',
     departmentId: '',
     active: true,
@@ -95,6 +98,7 @@ export default function Users() {
             const matchesQuery = !normalizedQuery
                 || user.name.toLowerCase().includes(normalizedQuery)
                 || user.email.toLowerCase().includes(normalizedQuery)
+                || (user.specialty || '').toLowerCase().includes(normalizedQuery)
                 || (user.department?.name || '').toLowerCase().includes(normalizedQuery);
             const matchesRole = !roleFilter || user.role === roleFilter;
             return matchesQuery && matchesRole;
@@ -113,6 +117,7 @@ export default function Users() {
             email: user.email,
             password: '',
             role: user.role,
+            specialty: user.specialty || '',
             messageSignature: user.messageSignature || '',
             departmentId: user.departmentId || '',
             active: user.active,
@@ -128,6 +133,7 @@ export default function Users() {
             name: form.name,
             email: form.email,
             role: form.role,
+            specialty: form.specialty || null,
             messageSignature: form.messageSignature || null,
             departmentId: form.departmentId || null,
             active: form.active,
@@ -216,7 +222,7 @@ export default function Users() {
                             <input
                                 value={query}
                                 onChange={(event) => setQuery(event.target.value)}
-                                placeholder="Nome, e-mail ou departamento"
+                                placeholder="Nome, e-mail, cargo ou departamento"
                                 className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30"
                             />
                         </label>
@@ -243,6 +249,7 @@ export default function Users() {
                     <SigmaTable
                         columns={[
                             { header: 'Nome & E-mail', align: 'left' },
+                            { header: 'Cargo', align: 'left' },
                             { header: 'Papel', align: 'center' },
                             { header: 'Departamento', align: 'center' },
                             { header: 'Status', align: 'center' },
@@ -251,8 +258,8 @@ export default function Users() {
                     >
                         {loading && (
                             <tr>
-                                <td colSpan={5} className="px-6 py-6">
-                                    <TableSkeleton rows={5} columns={5} />
+                                <td colSpan={6} className="px-6 py-6">
+                                    <TableSkeleton rows={5} columns={6} />
                                 </td>
                             </tr>
                         )}
@@ -268,6 +275,9 @@ export default function Users() {
                                             <p className="text-xs text-muted-foreground">{user.email}</p>
                                         </div>
                                     </div>
+                                </SigmaTableCell>
+                                <SigmaTableCell>
+                                    <span className="text-sm font-medium text-foreground">{user.specialty || 'Não informado'}</span>
                                 </SigmaTableCell>
                                 <SigmaTableCell align="center">
                                     <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${user.role === 'ADMIN' ? 'bg-warning-soft text-warning-fg' :
@@ -313,7 +323,7 @@ export default function Users() {
                         ))}
                         {!loading && filteredUsers.length === 0 && (
                             <tr>
-                                <td colSpan={5} className="px-6 py-6">
+                                <td colSpan={6} className="px-6 py-6">
                                     <EmptyState
                                         icon="group"
                                         title="Nenhum usuário encontrado"
@@ -349,6 +359,19 @@ export default function Users() {
                                     <option value="ATTENDANT">Atendente</option>
                                     <option value="TECHNICIAN">Técnico</option>
                                 </select>
+                            </label>
+                            <label htmlFor="user-specialty" className="block">
+                                <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Cargo</span>
+                                <input
+                                    id="user-specialty"
+                                    aria-label="Cargo"
+                                    value={form.specialty}
+                                    onChange={(event) => setForm({ ...form, specialty: event.target.value })}
+                                    placeholder="Ex: Consultor Técnico"
+                                    maxLength={160}
+                                    className="w-full rounded-lg border border-border bg-surface px-3 py-2.5 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/30"
+                                />
+                                <p className="mt-1 text-xs text-muted-foreground">Nome profissional exibido separadamente das permissões de acesso.</p>
                             </label>
                             <label className="block">
                                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Departamento</span>
