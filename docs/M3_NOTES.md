@@ -53,7 +53,7 @@ npm run prisma:seed
 npm run dev        # sobe API :3333
 ```
 Teste rápido (slice/tenancy):
-- `POST /api/auth/login` com `admin@dragonbyte.com` / `123456` → token (contém companyId).
+- `POST /api/auth/login` com `admin@sigmapdv.com` / `123456` → token (contém companyId).
 - `GET /api/tickets` com Bearer → só tickets da empresa A (não vê os da B).
 - `PATCH /api/tickets/:id` com transição inválida (ex.: CLOSED→IN_PROGRESS) → 400.
 - `POST /api/tickets/:id/evaluation` `{rating:5}` → CSAT.

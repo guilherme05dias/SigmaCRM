@@ -57,7 +57,7 @@ async function main() {
   // C1: hash único da senha DEV reusado em todos os usuários do seed.
   const devPasswordHash = await hashPassword('123456');
 
-  // ───────────────────── EMPRESA A — DragonByte ─────────────────────
+  // ───────────────────── EMPRESA A — SigmaPDV ─────────────────────
   const companyA = await prisma.company.create({
     data: { name: 'SigmaPDV', legalName: 'SigmaPDV' },
   });
@@ -65,7 +65,7 @@ async function main() {
     data: {
       companyId: companyA.id,
       businessHours,
-      welcomeMessage: 'Olá! Bem-vindo ao atendimento da DragonByte. Como podemos ajudar?',
+      welcomeMessage: 'Olá! Bem-vindo ao atendimento da SigmaPDV. Como podemos ajudar?',
       awayMessage: 'Atendemos de seg a sex, 09:00–18:00. Deixe sua mensagem.',
       closingMessage: 'Atendimento encerrado por um de nossos técnicos.',
     },
@@ -83,27 +83,27 @@ async function main() {
   });
   await setMessageSignature(aAdmin.id, 'Guilherme Dias | Suporte técnico');
   const aSupervisor = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Marina Supervisora', email: 'supervisor@dragonbyte.com', passwordHash: devPasswordHash, role: 'SUPERVISOR', departmentId: aSupport.id },
+    data: { companyId: companyA.id, name: 'Marina Supervisora', email: 'supervisor@sigmapdv.com', passwordHash: devPasswordHash, role: 'SUPERVISOR', departmentId: aSupport.id },
   });
   await setMessageSignature(aSupervisor.id, 'Marina Supervisora | Suporte tecnico');
   const aAgent = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Ana Suporte', email: 'ana@dragonbyte.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id },
+    data: { companyId: companyA.id, name: 'Ana Suporte', email: 'atendente@sigmapdv.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id },
   });
   await setMessageSignature(aAgent.id, 'Ana Suporte | Suporte tecnico');
   const aRafael = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Rafael Atendimento', email: 'rafael@dragonbyte.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id },
+    data: { companyId: companyA.id, name: 'Rafael Atendimento', email: 'rafael@sigmapdv.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id },
   });
   await setMessageSignature(aRafael.id, 'Rafael Atendimento | Suporte tecnico');
   const aTech = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Carlos Técnico', email: 'carlos@dragonbyte.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Redes e Cabeamento', departmentId: aN2.id, canViewAllConversations: true },
+    data: { companyId: companyA.id, name: 'Carlos Técnico', email: 'carlos@sigmapdv.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Redes e Cabeamento', departmentId: aN2.id, canViewAllConversations: true },
   });
   await setMessageSignature(aTech.id, 'Carlos Tecnico | Suporte tecnico');
   const aJulia = await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Julia Infra', email: 'julia@dragonbyte.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Servidores Linux', departmentId: aN2.id },
+    data: { companyId: companyA.id, name: 'Julia Infra', email: 'julia@sigmapdv.com', passwordHash: devPasswordHash, role: 'TECHNICIAN', specialty: 'Servidores Linux', departmentId: aN2.id },
   });
   await setMessageSignature(aJulia.id, 'Julia Infra | Suporte tecnico');
   await prisma.user.create({
-    data: { companyId: companyA.id, name: 'Usuario Inativo', email: 'inativo@dragonbyte.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id, active: false },
+    data: { companyId: companyA.id, name: 'Usuario Inativo', email: 'inativo@sigmapdv.com', passwordHash: devPasswordHash, role: 'ATTENDANT', departmentId: aSupport.id, active: false },
   });
 
   const aCustomer = await prisma.customer.create({
@@ -219,9 +219,9 @@ async function main() {
   console.log(`  Empresa A: ${companyA.name} (${companyA.id}) — ticket ${aTicket.protocol}`);
   console.log(`  Empresa B: ${companyB.name} (${companyB.id}) — ticket ${bTicket.protocol}`);
   console.log('  Logins dev (senha 123456):');
-  console.log('    DragonByte: admin@dragonbyte.com, supervisor@dragonbyte.com, ana@dragonbyte.com, rafael@dragonbyte.com, carlos@dragonbyte.com, julia@dragonbyte.com');
+  console.log('    SigmaPDV: admin@sigmapdv.com, supervisor@sigmapdv.com, atendente@sigmapdv.com, rafael@sigmapdv.com, carlos@sigmapdv.com, julia@sigmapdv.com');
   console.log('    Acme: admin@acme.com, supervisor@acme.com, lia@acme.com, mauro@acme.com');
-  console.log('    Inativos: inativo@dragonbyte.com, inativo@acme.com');
+  console.log('    Inativos: inativo@sigmapdv.com, inativo@acme.com');
 }
 
 main()

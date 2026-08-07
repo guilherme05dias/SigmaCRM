@@ -16,7 +16,7 @@ const SECTIONS: Section[] = [
         content: (
             <>
                 <p>
-                    Este documento rege a relação entre a <strong>DragonByte Sistemas e Soluções Web</strong>{' '}
+                    Este documento rege a relação entre a <strong>SigmaPDV</strong>{' '}
                     (&ldquo;Empresa&rdquo;, &ldquo;nós&rdquo; ou &ldquo;nosso&rdquo;), operadora da plataforma{' '}
                     <strong>Sigma Atendimento</strong>, e seus usuários e clientes (&ldquo;Usuário&rdquo; ou{' '}
                     &ldquo;Titular&rdquo;).
@@ -27,7 +27,7 @@ const SECTIONS: Section[] = [
                         ['Usuário interno', 'Operadores, atendentes e administradores cadastrados pela empresa contratante.'],
                         ['Usuário externo (cliente final)', 'Pessoa que entra em contato via WhatsApp para solicitar suporte ou informações.'],
                         ['Controlador', 'Empresa contratante do SaaS — responsável pelos dados de seus próprios clientes.'],
-                        ['Operador', 'DragonByte / Sigma Atendimento — processa dados sob instrução do Controlador (Art. 5º, VII, LGPD).'],
+                        ['Operador', 'SigmaPDV / Sigma Atendimento — processa dados sob instrução do Controlador (Art. 5º, VII, LGPD).'],
                         ['DPA', 'Data Processing Agreement — contrato de processamento de dados firmado entre Controlador e Operador.'],
                     ].map(([termo, def]) => (
                         <div key={termo as string} className="rounded-lg border border-border bg-surface p-3">
@@ -75,7 +75,7 @@ const SECTIONS: Section[] = [
             <>
                 <p>O acesso à plataforma pressupõe:</p>
                 <ol className="mt-3 space-y-2 text-sm list-decimal list-inside text-muted-foreground">
-                    <li>Celebração de contrato de prestação de serviços SaaS com a DragonByte.</li>
+                    <li>Celebração de contrato de prestação de serviços SaaS com a SigmaPDV.</li>
                     <li>Aceitação expressa destes Termos de Serviço e da Política de Privacidade.</li>
                     <li>Firmação do DPA (Data Processing Agreement) para compliance com a LGPD (Art. 39).</li>
                     <li>Fornecimento de dados cadastrais verídicos e atualizados da empresa contratante.</li>
@@ -135,7 +135,7 @@ const SECTIONS: Section[] = [
             <>
                 <div className="mt-2 grid gap-4 text-sm md:grid-cols-2">
                     <div className="rounded-xl border border-border bg-surface p-4">
-                        <p className="font-bold text-foreground border-b border-border pb-2 mb-3">DragonByte (Operador)</p>
+                        <p className="font-bold text-foreground border-b border-border pb-2 mb-3">SigmaPDV (Operador)</p>
                         <ul className="space-y-1.5 text-muted-foreground">
                             {[
                                 'Manter a plataforma disponível e segura.',
@@ -160,7 +160,7 @@ const SECTIONS: Section[] = [
                                 'Garantir opt-in dos clientes finais antes de iniciar contato ativo.',
                                 'Manter credenciais de acesso seguras e individualizadas.',
                                 'Utilizar a plataforma apenas para fins lícitos.',
-                                'Comunicar a DragonByte sobre solicitações de direitos dos titulares.',
+                                'Comunicar a SigmaPDV sobre solicitações de direitos dos titulares.',
                                 'Manter o plano de assinatura em dia para continuidade do serviço.',
                             ].map((item) => (
                                 <li key={item} className="flex gap-2">
@@ -209,7 +209,7 @@ const SECTIONS: Section[] = [
         content: (
             <>
                 <p>
-                    Na relação entre a DragonByte (Operador) e a empresa contratante (Controlador), o
+                    Na relação entre a SigmaPDV (Operador) e a empresa contratante (Controlador), o
                     tratamento de dados segue as seguintes premissas:
                 </p>
                 <div className="mt-4 space-y-3 text-sm">
@@ -243,7 +243,7 @@ const SECTIONS: Section[] = [
                     <p className="font-semibold text-foreground">Direitos dos titulares dos dados dos clientes finais</p>
                     <p className="mt-1 text-muted-foreground">
                         A empresa contratante (Controlador) é a principal responsável por atender os direitos
-                        dos seus clientes finais (Art. 18, LGPD). A DragonByte (Operador) fornecerá assistência
+                        dos seus clientes finais (Art. 18, LGPD). A SigmaPDV (Operador) fornecerá assistência
                         técnica para viabilizar o cumprimento dessas solicitações, conforme previsto no DPA.
                     </p>
                 </div>
@@ -255,7 +255,7 @@ const SECTIONS: Section[] = [
         title: '8. Disponibilidade e SLA',
         content: (
             <>
-                <p>A DragonByte envidar os melhores esforços para manter a plataforma disponível, observando:</p>
+                <p>A SigmaPDV envidará os melhores esforços para manter a plataforma disponível, observando:</p>
                 <div className="mt-4 overflow-x-auto">
                     <table className="w-full border-collapse text-sm">
                         <thead>
@@ -268,7 +268,7 @@ const SECTIONS: Section[] = [
                             {[
                                 ['Disponibilidade mensal', 'Objetivo de 99% de uptime (excluindo manutenções programadas e falhas de terceiros).'],
                                 ['Janelas de manutenção', 'Realizadas preferencialmente fora do horário comercial, com aviso prévio de 24h quando possível.'],
-                                ['Dependências de terceiros', 'A disponibilidade da WhatsApp Cloud API (Meta) está fora do controle da DragonByte. Falhas da Meta não caracterizam descumprimento de SLA.'],
+                                ['Dependências de terceiros', 'A disponibilidade da WhatsApp Cloud API (Meta) está fora do controle da SigmaPDV. Falhas da Meta não caracterizam descumprimento de SLA.'],
                                 ['Suporte', 'Atendimento a incidentes críticos em horário comercial (Seg–Sex, 09h–18h, horário de Brasília).'],
                             ].map(([tipo, compromisso]) => (
                                 <tr key={tipo as string}>
@@ -289,7 +289,7 @@ const SECTIONS: Section[] = [
             <>
                 <p>
                     A plataforma Sigma Atendimento, seu código-fonte, design, marcas, logotipos e demais
-                    elementos são de propriedade exclusiva da DragonByte Sistemas e Soluções Web, protegidos
+                    elementos são de propriedade exclusiva da SigmaPDV, protegidos
                     pela Lei nº 9.610/98 (Direitos Autorais) e pela Lei nº 9.279/96 (Propriedade Industrial).
                 </p>
                 <p className="mt-3 text-sm text-muted-foreground">
@@ -298,7 +298,7 @@ const SECTIONS: Section[] = [
                     as finalidades descritas nestes Termos.
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                    Os dados inseridos pelos Contratantes e seus clientes pertencem ao Contratante. A DragonByte
+                    Os dados inseridos pelos Contratantes e seus clientes pertencem ao Contratante. A SigmaPDV
                     não reivindica propriedade sobre tais dados.
                 </p>
             </>
@@ -313,7 +313,7 @@ const SECTIONS: Section[] = [
                 <ul className="mt-3 space-y-2 text-sm">
                     {[
                         { por: 'Pelo Contratante', motivo: 'A qualquer momento, mediante aviso prévio de 30 dias, sem multa (salvo disposição contratual específica em contrário).' },
-                        { por: 'Pela DragonByte', motivo: 'Por violação destes Termos, inadimplência por mais de 30 dias, ou mediante aviso prévio de 30 dias sem necessidade de justificativa.' },
+                        { por: 'Pela SigmaPDV', motivo: 'Por violação destes Termos, inadimplência por mais de 30 dias, ou mediante aviso prévio de 30 dias sem necessidade de justificativa.' },
                         { por: 'Por qualquer das partes', motivo: 'Em caso de força maior, caso fortuito ou encerramento das atividades da outra parte.' },
                     ].map(({ por, motivo }) => (
                         <li key={por} className="rounded-lg border border-border bg-surface p-3">
@@ -336,7 +336,7 @@ const SECTIONS: Section[] = [
         content: (
             <>
                 <p>
-                    Na máxima extensão permitida pela legislação brasileira, a DragonByte não será responsável por:
+                    Na máxima extensão permitida pela legislação brasileira, a SigmaPDV não será responsável por:
                 </p>
                 <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
                     {[
@@ -353,7 +353,7 @@ const SECTIONS: Section[] = [
                     ))}
                 </ul>
                 <p className="mt-3 text-sm text-muted-foreground">
-                    A responsabilidade total da DragonByte, em qualquer hipótese, fica limitada ao valor pago
+                    A responsabilidade total da SigmaPDV, em qualquer hipótese, fica limitada ao valor pago
                     pelo Contratante nos últimos 3 meses anteriores ao evento que gerou o dano.
                 </p>
             </>
@@ -364,7 +364,7 @@ const SECTIONS: Section[] = [
         title: '12. Alterações nestes Termos',
         content: (
             <p>
-                A DragonByte reserva-se o direito de atualizar estes Termos de Serviço a qualquer momento.
+                A SigmaPDV reserva-se o direito de atualizar estes Termos de Serviço a qualquer momento.
                 Alterações substanciais serão comunicadas por e-mail e/ou por aviso na plataforma com
                 antecedência mínima de <strong>10 dias corridos</strong>. O uso continuado da plataforma após
                 a vigência das alterações constituirá aceitação tácita dos novos Termos.
@@ -386,7 +386,7 @@ const SECTIONS: Section[] = [
                     <li>Código de Defesa do Consumidor, quando aplicável (Lei nº 8.078/1990)</li>
                 </ul>
                 <p className="mt-3 text-sm text-muted-foreground">
-                    Para dirimir quaisquer controvérsias, fica eleito o foro da Comarca da sede da DragonByte,
+                    Para dirimir quaisquer controvérsias, fica eleito o foro da Comarca da sede da SigmaPDV,
                     no Estado de São Paulo, com renúncia a qualquer outro, por mais privilegiado que seja.
                 </p>
             </>
@@ -533,8 +533,8 @@ export default function TermsOfService() {
                         {/* Rodapé do documento */}
                         <footer className="mt-16 flex flex-col gap-4 rounded-xl border border-border bg-surface p-6 sm:flex-row sm:items-center sm:justify-between">
                             <div className="text-sm text-muted-foreground">
-                                <p className="font-semibold text-foreground">DragonByte Sistemas e Soluções Web</p>
-                                <p>contato@dragonbytesites.com.br</p>
+                                <p className="font-semibold text-foreground">SigmaPDV</p>
+                                <p>contato@sigmapdv.com</p>
                                 <p className="mt-1">
                                     Última atualização:{' '}
                                     {new Date().toLocaleDateString('pt-BR', {

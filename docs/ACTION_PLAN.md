@@ -393,8 +393,8 @@ empresa chegavam em sockets de outra.
 - Os **5 `getIO().to('conversation:'+id')`** (`message:new`) já eram isolados pela sala da
   conversa — mantidos.
 
-**Validação.** `npm run build` (api) ✅. **E2E em runtime:** 2 sockets (DragonByte +
-Acme), `transfer` de uma conversa da DragonByte → socket DragonByte recebeu
+**Validação.** `npm run build` (api) ✅. **E2E em runtime:** 2 sockets (SigmaPDV +
+Acme), `transfer` de uma conversa da SigmaPDV → socket SigmaPDV recebeu
 `conversation:updated`, **socket Acme NÃO recebeu**. ✅
 
 **Arquivos.** `apps/api/src/socket.ts`, `routes/{conversations,inbox,tickets,whatsapp}.routes.ts`.

@@ -14,7 +14,7 @@ describe('acompanhamento global de conversas', () => {
         );
 
         expect(migration).toContain('can_view_all_conversations');
-        expect(migration).toContain('carlos@dragonbyte.com');
+        expect(migration).toContain('carlos@sigmapdv.com');
         expect(carlosGrantMigration).toContain('carlos@sigmapdv.com');
         expect(canReadAllConversations({
             id: 'carlos-id',

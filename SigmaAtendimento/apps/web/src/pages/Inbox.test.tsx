@@ -166,7 +166,7 @@ describe('estabilidade da conversa aberta durante atualizações', () => {
         Object.assign(mocks.user, {
             id: 'carlos-id',
             name: 'Carlos Técnico',
-            email: 'carlos@dragonbyte.com',
+            email: 'carlos@sigmapdv.com',
             role: 'TECHNICIAN',
             canViewAllConversations: true,
         });

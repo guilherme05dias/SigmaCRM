@@ -6,17 +6,17 @@ Todos os usuários abaixo usam a senha:
 123456
 ```
 
-## DragonByte Solutions
+## SigmaPDV
 
 | Perfil | E-mail | Status |
 |---|---|---|
-| Admin | `admin@dragonbyte.com` | Ativo |
-| Supervisor | `supervisor@dragonbyte.com` | Ativo |
-| Atendente | `ana@dragonbyte.com` | Ativo |
-| Atendente | `rafael@dragonbyte.com` | Ativo |
-| Técnico | `carlos@dragonbyte.com` | Ativo |
-| Técnico | `julia@dragonbyte.com` | Ativo |
-| Atendente | `inativo@dragonbyte.com` | Inativo |
+| Admin | `admin@sigmapdv.com` | Ativo |
+| Supervisor | `supervisor@sigmapdv.com` | Ativo |
+| Atendente | `atendente@sigmapdv.com` | Ativo |
+| Atendente | `rafael@sigmapdv.com` | Ativo |
+| Técnico | `carlos@sigmapdv.com` | Ativo |
+| Técnico | `julia@sigmapdv.com` | Ativo |
+| Atendente | `inativo@sigmapdv.com` | Inativo |
 
 ## Acme Tech
 

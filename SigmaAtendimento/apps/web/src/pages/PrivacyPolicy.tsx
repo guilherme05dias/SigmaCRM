@@ -16,7 +16,7 @@ const SECTIONS: Section[] = [
         content: (
             <>
                 <p>
-                    A presente Política de Privacidade descreve como a <strong>DragonByte Sistemas e Soluções Web</strong>{' '}
+                    A presente Política de Privacidade descreve como a <strong>SigmaPDV</strong>{' '}
                     (&ldquo;Empresa&rdquo;, &ldquo;nós&rdquo; ou &ldquo;nosso&rdquo;), operadora da plataforma{' '}
                     <strong>Sigma Atendimento</strong>, trata dados pessoais de clientes, usuários e pessoas que
                     interagem conosco por meio de nossos canais de atendimento, em especial o WhatsApp.
@@ -29,9 +29,9 @@ const SECTIONS: Section[] = [
                 <div className="mt-4 rounded-xl border border-border bg-surface p-4">
                     <p className="text-sm font-semibold text-foreground">Controlador de Dados (Art. 5º, VI, LGPD)</p>
                     <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                        <p><span className="font-medium text-foreground">Razão Social:</span> DragonByte Sistemas e Soluções Web</p>
+                        <p><span className="font-medium text-foreground">Razão Social:</span> SigmaPDV</p>
                         <p><span className="font-medium text-foreground">CNPJ:</span> XX.XXX.XXX/0001-XX</p>
-                        <p><span className="font-medium text-foreground">E-mail do Encarregado (DPO):</span> privacidade@dragonbytesites.com.br</p>
+                        <p><span className="font-medium text-foreground">E-mail do Encarregado (DPO):</span> privacidade@sigmapdv.com</p>
                         <p><span className="font-medium text-foreground">Endereço:</span> Brasil</p>
                     </div>
                 </div>
@@ -231,8 +231,8 @@ const SECTIONS: Section[] = [
                     <p className="text-sm font-semibold text-foreground">Como exercer seus direitos</p>
                     <p className="mt-1 text-sm text-muted-foreground">
                         Envie sua solicitação para{' '}
-                        <a href="mailto:privacidade@dragonbytesites.com.br" className="text-primary hover:underline">
-                            privacidade@dragonbytesites.com.br
+                        <a href="mailto:privacidade@sigmapdv.com" className="text-primary hover:underline">
+                            privacidade@sigmapdv.com
                         </a>
                         . Responderemos em até <strong>15 dias úteis</strong>, conforme prazo estabelecido
                         pela ANPD. Para solicitações de eliminação ou portabilidade, podemos solicitar a
@@ -329,8 +329,8 @@ const SECTIONS: Section[] = [
                     <div className="grid gap-2 text-sm sm:grid-cols-2">
                         {[
                             ['Encarregado (DPO)', 'Equipe de Privacidade'],
-                            ['E-mail', 'privacidade@dragonbytesites.com.br'],
-                            ['Empresa', 'DragonByte Sistemas e Soluções Web'],
+                            ['E-mail', 'privacidade@sigmapdv.com'],
+                            ['Empresa', 'SigmaPDV'],
                             ['CNPJ', 'XX.XXX.XXX/0001-XX'],
                             ['País', 'Brasil'],
                             ['Prazo de resposta', 'até 15 dias úteis'],
@@ -485,8 +485,8 @@ export default function PrivacyPolicy() {
                         {/* Rodapé do documento */}
                         <footer className="mt-16 flex flex-col gap-4 rounded-xl border border-border bg-surface p-6 sm:flex-row sm:items-center sm:justify-between">
                             <div className="text-sm text-muted-foreground">
-                                <p className="font-semibold text-foreground">DragonByte Sistemas e Soluções Web</p>
-                                <p>privacidade@dragonbytesites.com.br</p>
+                                <p className="font-semibold text-foreground">SigmaPDV</p>
+                                <p>privacidade@sigmapdv.com</p>
                                 <p className="mt-1">
                                     Última atualização:{' '}
                                     {new Date().toLocaleDateString('pt-BR', {

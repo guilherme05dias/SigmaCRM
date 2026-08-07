@@ -40,7 +40,7 @@ Content-Type: application/json
 
 ```json
 {
-  "email": "admin@dragonbyte.com",
+  "email": "admin@sigmapdv.com",
   "password": "123456"
 }
 ```
@@ -52,7 +52,7 @@ Resposta:
   "token": "...",
   "user": {
     "id": "...",
-    "email": "admin@dragonbyte.com",
+    "email": "admin@sigmapdv.com",
     "name": "Guilherme",
     "role": "ADMIN",
     "companyId": "..."
