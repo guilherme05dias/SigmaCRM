@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatWindow } from './ChatWindow';
@@ -24,9 +24,11 @@ const conversation = {
 function renderChatWindow(options: {
     messages?: any[];
     serviceTopics?: Array<{ id: string; name: string; active?: boolean }>;
+    transferUsers?: Array<{ id: string; name: string; active?: boolean }>;
     isLoadingServiceTopics?: boolean;
     serviceTopicsError?: string | null;
     onReloadServiceTopics?: () => Promise<void>;
+    onTransfer?: (target: { departmentId?: string; assignedUserId?: string }) => void;
 } = {}) {
     const onReloadServiceTopics = options.onReloadServiceTopics ?? vi.fn().mockResolvedValue(undefined);
     render(
@@ -44,13 +46,14 @@ function renderChatWindow(options: {
                 onEdit={vi.fn().mockResolvedValue(true)}
                 onReact={vi.fn().mockResolvedValue(true)}
                 onSyncHistory={vi.fn().mockResolvedValue(undefined)}
-                onTransfer={vi.fn()}
+                onTransfer={options.onTransfer ?? vi.fn()}
                 onCloseConversation={vi.fn().mockResolvedValue(undefined)}
                 onCreateTicket={vi.fn().mockResolvedValue(undefined)}
                 isClosingConversation={false}
                 isCreatingTicket={false}
                 createTicketError={null}
                 departments={[]}
+                transferUsers={options.transferUsers ?? []}
                 serviceTopics={options.serviceTopics ?? [{ id: '55555555-5555-4555-8555-555555555555', name: 'Sigma PDV', active: true }]}
                 isLoadingServiceTopics={options.isLoadingServiceTopics ?? false}
                 serviceTopicsError={options.serviceTopicsError ?? null}
@@ -66,6 +69,30 @@ function renderChatWindow(options: {
     );
     return { onReloadServiceTopics };
 }
+
+describe('transferência do atendimento', () => {
+    afterEach(() => cleanup());
+
+    it('permite escolher um usuário ativo como destino específico', () => {
+        const onTransfer = vi.fn();
+        renderChatWindow({
+            onTransfer,
+            transferUsers: [
+                { id: 'user-2', name: 'Beatriz', active: true },
+                { id: 'user-3', name: 'Usuário inativo', active: false },
+            ],
+        });
+
+        const destination = screen.getByRole('combobox', { name: 'Destino da transferência' });
+        expect(within(destination).getByRole('option', { name: 'Beatriz' })).toBeTruthy();
+        expect(within(destination).queryByRole('option', { name: 'Usuário inativo' })).toBeNull();
+
+        fireEvent.change(destination, { target: { value: 'user:user-2' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Transferir' }));
+
+        expect(onTransfer).toHaveBeenCalledWith({ assignedUserId: 'user-2' });
+    });
+});
 
 describe('encerramento do atendimento no WhatsApp', () => {
     beforeEach(() => {

@@ -29,7 +29,7 @@ interface ChatWindowProps {
     onEdit: (messageId: string, body: string) => Promise<boolean>;
     onReact: (messageId: string, emoji: string) => Promise<boolean>;
     onSyncHistory: () => Promise<void>;
-    onTransfer: (departmentId: string) => void;
+    onTransfer: (target: { departmentId?: string; assignedUserId?: string }) => void;
     onCloseConversation: (payload: {
         result: string;
         summary: string;
@@ -55,6 +55,7 @@ interface ChatWindowProps {
     isCreatingTicket: boolean;
     createTicketError: string | null;
     departments: Array<{ id: string; name: string; active?: boolean }>;
+    transferUsers: Array<{ id: string; name: string; active?: boolean }>;
     serviceTopics: Array<{ id: string; name: string; description?: string | null; active?: boolean }>;
     isLoadingServiceTopics: boolean;
     serviceTopicsError: string | null;
@@ -78,6 +79,14 @@ type SelectedAttachment = {
     type: Exclude<Message['type'], 'TEXT'>;
     previewUrl: string | null;
 };
+
+function transferPayload(value: string): { departmentId?: string; assignedUserId?: string } | null {
+    const [destinationType, destinationId] = value.split(':', 2);
+    if (!destinationId) return null;
+    if (destinationType === 'user') return { assignedUserId: destinationId };
+    if (destinationType === 'department') return { departmentId: destinationId };
+    return null;
+}
 
 function attachmentType(file: File): SelectedAttachment['type'] {
     if (file.type.startsWith('image/')) return 'IMAGE';
@@ -329,6 +338,7 @@ export function ChatWindow({
     isCreatingTicket,
     createTicketError,
     departments,
+    transferUsers,
     serviceTopics,
     isLoadingServiceTopics,
     serviceTopicsError,
@@ -352,7 +362,7 @@ export function ChatWindow({
     const [messageActionMenuId, setMessageActionMenuId] = useState<string | null>(null);
     const [reactionPickerMessageId, setReactionPickerMessageId] = useState<string | null>(null);
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-    const [departmentId, setDepartmentId] = useState('');
+    const [transferTarget, setTransferTarget] = useState('');
     const [ticketModalOpen, setTicketModalOpen] = useState(false);
     const [closeModalOpen, setCloseModalOpen] = useState(false);
     const closeDialogRef = useDialogFocus<HTMLDivElement>(closeModalOpen, () => {
@@ -742,6 +752,16 @@ export function ChatWindow({
     const contactName = contactDisplayName(conversation.contact);
 
     const canAct = canReply;
+    const activeTransferUsers = transferUsers.filter((transferUser) => transferUser.active ?? true);
+    const activeDepartments = departments.filter((department) => department.active ?? true);
+    const canTransfer = activeTransferUsers.length > 0 || activeDepartments.length > 0;
+
+    const submitTransfer = (value: string) => {
+        const payload = transferPayload(value);
+        if (!payload) return;
+        onTransfer(payload);
+        setTransferTarget('');
+    };
 
     const resetCloseForm = () => {
         setCloseForm({
@@ -934,7 +954,7 @@ export function ChatWindow({
                                 <span className="sigma-chat-action-label sigma-chat-action-label--secondary">Encerrar</span>
                             </Button>
 
-                            {departments.length > 0 && (
+                            {canTransfer && (
                                 <label
                                     className="sigma-chat-transfer-compact relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-surface text-muted-foreground transition-colors hover:bg-surface-alt hover:text-foreground"
                                     title="Transferir atendimento"
@@ -942,39 +962,61 @@ export function ChatWindow({
                                     <Icon name="swap_horiz" className="size-5" />
                                     <select
                                         value=""
-                                        onChange={(e) => { if (e.target.value) onTransfer(e.target.value); }}
-                                        aria-label="Transferir atendimento para outro departamento"
+                                        onChange={(e) => submitTransfer(e.target.value)}
+                                        aria-label="Transferir atendimento para usuário ou setor"
                                         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                                     >
                                         <option value="">Transferir atendimento</option>
-                                        {departments.filter((d) => d.active ?? true).map((d) => (
-                                            <option key={d.id} value={d.id}>{d.name}</option>
-                                        ))}
+                                        {activeTransferUsers.length > 0 && (
+                                            <optgroup label="Usuários">
+                                                {activeTransferUsers.map((transferUser) => (
+                                                    <option key={transferUser.id} value={`user:${transferUser.id}`}>{transferUser.name}</option>
+                                                ))}
+                                            </optgroup>
+                                        )}
+                                        {activeDepartments.length > 0 && (
+                                            <optgroup label="Setores">
+                                                {activeDepartments.map((department) => (
+                                                    <option key={department.id} value={`department:${department.id}`}>{department.name}</option>
+                                                ))}
+                                            </optgroup>
+                                        )}
                                     </select>
                                 </label>
                             )}
 
-                            {departments.length > 0 && (
+                            {canTransfer && (
                                 <form
-                                    onSubmit={(e) => { e.preventDefault(); if (departmentId) onTransfer(departmentId); }}
+                                    onSubmit={(e) => { e.preventDefault(); submitTransfer(transferTarget); }}
                                     className="sigma-chat-transfer-wide items-center gap-2"
                                 >
                                     <select
-                                        value={departmentId}
-                                        onChange={(e) => setDepartmentId(e.target.value)}
-                                        aria-label="Departamento de destino"
+                                        value={transferTarget}
+                                        onChange={(e) => setTransferTarget(e.target.value)}
+                                        aria-label="Destino da transferência"
                                         className="sigma-chat-transfer-select min-h-11 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/30"
                                     >
                                         <option value="">Transferir para...</option>
-                                        {departments.filter((d) => d.active ?? true).map((d) => (
-                                            <option key={d.id} value={d.id}>{d.name}</option>
-                                        ))}
+                                        {activeTransferUsers.length > 0 && (
+                                            <optgroup label="Usuários">
+                                                {activeTransferUsers.map((transferUser) => (
+                                                    <option key={transferUser.id} value={`user:${transferUser.id}`}>{transferUser.name}</option>
+                                                ))}
+                                            </optgroup>
+                                        )}
+                                        {activeDepartments.length > 0 && (
+                                            <optgroup label="Setores">
+                                                {activeDepartments.map((department) => (
+                                                    <option key={department.id} value={`department:${department.id}`}>{department.name}</option>
+                                                ))}
+                                            </optgroup>
+                                        )}
                                     </select>
                                     <Button
                                         type="submit"
                                         variant="outline"
                                         size="sm"
-                                        disabled={!departmentId}
+                                        disabled={!transferTarget}
                                         className="sigma-chat-transfer-submit"
                                     >
                                         Transferir

@@ -141,6 +141,7 @@ export default function Inbox() {
     const [isStartingConversation, setIsStartingConversation] = useState(false);
     const [messages, setMessages] = useState<Message[]>([]);
     const [departments, setDepartments] = useState<DepartmentOption[]>([]);
+    const [transferUsers, setTransferUsers] = useState<UserOption[]>([]);
     const [serviceTopics, setServiceTopics] = useState<ServiceTopicOption[]>([]);
     const [isLoadingServiceTopics, setIsLoadingServiceTopics] = useState(true);
     const [serviceTopicsError, setServiceTopicsError] = useState<string | null>(null);
@@ -283,11 +284,13 @@ export default function Inbox() {
         void loadServiceTopics();
         apiRequest<UserOption[]>('/api/users')
             .then((data) => {
-                const activeTechnicians = Array.isArray(data)
-                    ? data
-                        .filter((userOption) => userOption.role === 'TECHNICIAN' && (userOption.active ?? true))
-                        .map((userOption) => ({ id: userOption.id, name: userOption.name, active: userOption.active }))
+                const activeUsers = Array.isArray(data)
+                    ? data.filter((userOption) => userOption.active ?? true)
                     : [];
+                const activeTechnicians = activeUsers
+                    .filter((userOption) => userOption.role === 'TECHNICIAN')
+                    .map((userOption) => ({ id: userOption.id, name: userOption.name, active: userOption.active }));
+                setTransferUsers(activeUsers);
                 setTechnicians(activeTechnicians);
             })
             .catch(handleApiError);
@@ -672,11 +675,11 @@ export default function Inbox() {
         }
     };
 
-    const handleTransfer = (departmentId: string) => {
+    const handleTransfer = (target: { departmentId?: string; assignedUserId?: string }) => {
         if (!selectedConvId) return;
         apiRequest(`/api/conversations/${selectedConvId}/transfer`, {
             method: 'POST',
-            body: JSON.stringify({ departmentId })
+            body: JSON.stringify(target)
         })
             .then(() => {
                 loadConversations();
@@ -862,6 +865,7 @@ export default function Inbox() {
                     isCreatingTicket={isCreatingTicket}
                     createTicketError={createTicketError}
                     departments={departments}
+                    transferUsers={transferUsers}
                     serviceTopics={serviceTopics}
                     isLoadingServiceTopics={isLoadingServiceTopics}
                     serviceTopicsError={serviceTopicsError}
